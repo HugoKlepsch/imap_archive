@@ -30,6 +30,16 @@ Secrets are stored in `.env.bash` file. A template is provided in `.env.bash.tem
 
 # Details
 
+## Users & Groups
+
+Create `imapapp:imapapp` and ensure that your devops user `user` has access:
+
+```shell
+sudo groupadd imapapp
+sudo useradd -r -g imapapp -s /bin/false -M imapapp
+sudo usermod -a -G imapapp user
+```
+
 ## Storage
 
 * All data is stored on my Synology NAS, mounted via Samba.
