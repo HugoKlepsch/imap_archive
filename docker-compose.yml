@@ -8,13 +8,11 @@ services:
     ports:
       - "143:143"   # IMAP
       - "993:993"   # IMAPS
-      - "110:110"   # POP3 (optional)
-      - "995:995"   # POP3S (optional)
-    volumes:
-      - ${dovecot_dir}/conf:/etc/dovecot
-      - ${dovecot_dir}/mail:/var/mail
-      - ${dovecot_dir}/logs:/var/log/dovecot
-      - ${dovecot_certs_dir}/certs:/etc/ssl/certs/dovecot:ro
+    # volumes:
+    #   - ${dovecot_dir}/conf:/etc/dovecot
+    #   - ${dovecot_dir}/mail:/var/mail
+    #   - ${dovecot_dir}/logs:/var/log/dovecot
+    #   - ${dovecot_certs_dir}/certs:/etc/dovecot/ssl:ro
     environment:
       - DOVECOT_HOSTNAME=${dovecot_hostname}
 
