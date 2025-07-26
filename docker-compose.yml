@@ -27,7 +27,7 @@ services:
     volumes:
       - ${roundcube_dir}/config:/var/roundcube/config
       - ${roundcube_dir}/logs:/var/logs
-      - ${roundcube_dir}/db:/var/roundcube/db
+      - ${roundcube_db_dir}/db:/var/roundcube/db
     environment:
       - ROUNDCUBEMAIL_DB_TYPE=sqlite
       - ROUNDCUBEMAIL_DB_NAME=roundcubemaildb
