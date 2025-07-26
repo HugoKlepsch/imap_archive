@@ -11,12 +11,12 @@ services:
       - "110:110"   # POP3 (optional)
       - "995:995"   # POP3S (optional)
     volumes:
-      - ./dovecot/conf:/etc/dovecot
-      - ./dovecot/mail:/var/mail
-      - ./dovecot/logs:/var/log/dovecot
-      - ./certs:/etc/ssl/certs/dovecot:ro
+      - ${dovecot_dir}/conf:/etc/dovecot
+      - ${dovecot_dir}/mail:/var/mail
+      - ${dovecot_dir}/logs:/var/log/dovecot
+      - ${dovecot_certs_dir}/certs:/etc/ssl/certs/dovecot:ro
     environment:
-      - DOVECOT_HOSTNAME=mail.yourdomain.com
+      - DOVECOT_HOSTNAME=${dovecot_hostname}
 
   roundcube:
     image: roundcube/roundcubemail:latest
@@ -25,9 +25,9 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./roundcube/config:/var/roundcube/config
-      - ./roundcube/logs:/var/logs
-      - ./roundcube/db:/var/roundcube/db
+      - ${roundcube_dir}/config:/var/roundcube/config
+      - ${roundcube_dir}/logs:/var/logs
+      - ${roundcube_dir}/db:/var/roundcube/db
     environment:
       - ROUNDCUBEMAIL_DB_TYPE=sqlite
       - ROUNDCUBEMAIL_DB_NAME=/var/roundcube/db/sqlite.db

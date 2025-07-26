@@ -59,11 +59,11 @@ WantedBy=multi-user.target
 EOF
 
 imap_unit_name="imap-archive.service"
-echo "Creating plex systemd service... ${imap_unit_name}"
+echo "Creating imap-archive systemd service... ${imap_unit_name}"
 # Create systemd service file
 cat >"${GEN_DIR}/${imap_unit_name}" <<EOF
 [Unit]
-Description=Run plex in docker compose
+Description=Run local IMAP server and webUI in docker compose
 After=${mount_unit_name} docker.service network-online.target
 Requires=${mount_unit_name} docker.service network-online.target
 
@@ -74,29 +74,29 @@ User=root
 Group=docker
 WorkingDirectory=$(pwd)
 # Shutdown container (if running) when unit is started
-ExecStartPre=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f compose/plex/docker-compose-plex.yml down"
+ExecStartPre=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml down"
 # Start container when unit is started
-ExecStart=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f compose/plex/docker-compose-plex.yml up"
+ExecStart=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml up"
 # Stop container when unit is stopped
-ExecStop=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f compose/plex/docker-compose-plex.yml down"
+ExecStop=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml down"
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-backup_service_unit_name="plex-backup.service"
+backup_service_unit_name="imap-archive-backup.service"
 echo "Creating backup systemd service... ${backup_service_unit_name}"
 # Create systemd service file
 cat >"${GEN_DIR}/${backup_service_unit_name}" <<EOF
 [Unit]
-Description=Plex Data Backup Service
+Description=IMAP archive data backup service
 After=${mount_unit_name}
 Requires=${mount_unit_name}
 
 [Service]
 Type=oneshot
-User=plex
-Group=plexapp
+User=imapapp
+Group=imapapp
 WorkingDirectory=$(pwd)
 ExecStart=$(pwd)/backup.sh
 
@@ -104,12 +104,12 @@ ExecStart=$(pwd)/backup.sh
 WantedBy=multi-user.target
 EOF
 
-backup_timer_unit_name="plex-backup.timer"
+backup_timer_unit_name="imap-archive-backup.timer"
 echo "Creating backup systemd timer... ${backup_timer_unit_name}"
 # Create systemd service file
 cat >"${GEN_DIR}/${backup_timer_unit_name}" <<EOF
 [Unit]
-Description=Run Plex Data Backup Daily
+Description=Run IMAP archive data backup daily
 Requires=${backup_service_unit_name}
 
 [Timer]
@@ -128,11 +128,12 @@ if [[ "${INSTALL:-false}" == "true" ]]; then
 	echo "Installing imap-archive systemd service... /etc/systemd/system/${imap_unit_name}"
 	sudo cp "${GEN_DIR}/${imap_unit_name}" "/etc/systemd/system/${imap_unit_name}"
 
-	echo "Installing plex backup service... /etc/systemd/system/${backup_service_unit_name}"
-	sudo cp "${GEN_DIR}/${backup_service_unit_name}" "/etc/systemd/system/${backup_service_unit_name}"
+  # TODO: backup/restore is not implemented yet
+	# echo "Installing imap-archive backup service... /etc/systemd/system/${backup_service_unit_name}"
+	# sudo cp "${GEN_DIR}/${backup_service_unit_name}" "/etc/systemd/system/${backup_service_unit_name}"
 
-	echo "Installing plex backup timer... /etc/systemd/system/${backup_timer_unit_name}"
-	sudo cp "${GEN_DIR}/${backup_timer_unit_name}" "/etc/systemd/system/${backup_timer_unit_name}"
+	# echo "Installing imap-archive backup timer... /etc/systemd/system/${backup_timer_unit_name}"
+	# sudo cp "${GEN_DIR}/${backup_timer_unit_name}" "/etc/systemd/system/${backup_timer_unit_name}"
 
 	sudo systemctl daemon-reload
 
@@ -142,7 +143,8 @@ if [[ "${INSTALL:-false}" == "true" ]]; then
 		sudo systemctl enable --now "${mount_unit_name}"
 		sudo systemctl enable --now "${imap_unit_name}"
 		# Note: you only need to enable/start the timer, not the service it runs
-		sudo systemctl enable --now "${backup_timer_unit_name}"
+		# TODO: backup/restore is not implemented yet
+		# sudo systemctl enable --now "${backup_timer_unit_name}"
 		exit 0
 	else
 		echo "Run with INSTALL=true ENABLE_NOW=true ./create... to install and start and enable"

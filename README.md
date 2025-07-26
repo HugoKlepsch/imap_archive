@@ -2,16 +2,18 @@
 
 ---
 
-# High level design
+# High-level design
 
 ## Goal
 
-Run a IMAP server for archiving emails. Sync emails to server using `imapsync`.
+Run an IMAP server for archiving emails. Sync emails to server using `imapsync`.
 
 ## Components
 
-* Dovecot - IMAP server		(port 143, 993)
-* Roundcube - IMAP server webUI	(port 8080)
+| Component | Description       | Ports    |
+|-----------|-------------------|----------|
+| Dovecot   | IMAP server       | 143, 993 |
+| Roundcube | IMAP server webUI | 8080     |
 
 Components are run as docker containers, started with docker-compose,
 service lifecycle managed by Systemd unit files. Configuration and secrets
@@ -34,9 +36,7 @@ Secrets are stored in `.env.bash` file. A template is provided in `.env.bash.tem
 * Application configs are not on the NAS-mounted drive, because they contain
   SQLite DBs, and don't tend to work well with NAS mounts because they don't 
   support file locking properly.
-* Mounted as `plex:plexapp`
-* All data is on one filesystem so that hardlinks can be used to enable
-  atomic moves and deduplication.
+* Mounted as `nobody:imapapp`
 
 ### Directory Structure
 
@@ -47,7 +47,7 @@ TODO `tree` output
 
 ### Samba credentials 
 
-Create a credentials file here:
+Create a credential file here:
 
 ```bash
 sudo vim /etc/samba/creds_imap_archive 
@@ -60,7 +60,7 @@ username=foo
 password=bar
 ```
 
-Note: no quotation marks needed. If you need it, `domain` can also be added.
+Note: no quotations needed. If you need it, `domain` can also be added.
 
 Protect it:
 
@@ -70,31 +70,20 @@ sudo chmod 600 /etc/samba/creds_imap_archive
 
 ### Systemd mount using CIFS
 
-
 The `create-systemd-service.sh` script will generate a set of systemd units, 
 one of which mounts the samba share. For me, I want to mount it to 
-`/home/user/imap-archive/nas_data_mnt`, so it creates a 
-`home-user-imap-archive-plex_data_mnt.mount` unit. This is then installed into 
+`/home/user/imap_archive/nas_data_mnt`, so it creates a 
+`home-user-imap_archive-nas_data_mnt.mount` unit. This is then installed into 
 `/etc/systemd/system/`.
-
-## Torrent client (qBittorrent)
-
-* qBittorrent is the torrent client.
-* It is run as `transmission:plexapp`.
-* It is run using the `arrs` systemd service in the arrs compose file 
-  `arrs-compose/docker-compose-arrs.yml`.
-* Set a WebUI password on first use. The temporary password is printed in 
-  the logs on first startup.
-* You must configure a proxy. My seedbox provider has a HTTP proxy service, 
-  which I configure in the qBittorrent webUI.
-* WebUI is available on port 3489.
 
 # Backup & Restore
 
+TODO
+
 * The config directories are backed up using the `backup.sh` script. 
 * You can restore from backup using `restore.sh`.
-* `backup.sh` is run daily using `plex-backup.service` and `plex-backup.timer`
-  (generated).
+* `backup.sh` is run daily using `imap-archive-backup.service` and `imap-archive-backup.timer`
+  (generated). These run as imapapp:imapapp
 
 ## Usage
 
@@ -104,11 +93,11 @@ one of which mounts the samba share. For me, I want to mount it to
 ./backup.sh
 ```
 
-- Creates timestamped backup in `~/plex/plex_data_mnt/plex2/backups/`
+- Creates timestamped backup in `~/imap_archive/nas_data_mnt/backups/`
 - Excludes cache, logs, and temporary files
 - Keeps latest 30 days of backups
 - Creates `latest_backup.tar.gz` symlink
-- Must be run as `plex:plexapp` user:group
+- Must be run as `imapapp:imapapp` user:group
 
 ### Manual Restore
 
@@ -118,31 +107,33 @@ one of which mounts the samba share. For me, I want to mount it to
 
 - Interactive menu to select backup
 - Creates safety backup of existing data
-- Restores selected backup to original location
+- Restores selected backup to the original location
 
 **Or specify backup file directly:**
 
 ```bash
-./restore.sh plex_backup_20240623_120000.tar.gz
+./restore.sh imap_backup_20240623_120000.tar.gz
 ```
 
 ### Check Backup Status
 
 ```bash
 # View systemd timer status
-sudo systemctl status plex-backup.timer
+sudo systemctl status imap-archive-backup.timer
 
 # View recent backup logs
-sudo journalctl -u plex-backup.service -n 20
+sudo journalctl -u imap-archive-backup.service -n 20
 
 # Check backup directory
-ls -la ~/plex/plex_data_mnt/plex2/backups/
+ls -la ~/imap_archive/nas_data_mnt/backups/
 ```
 
 ## Directory Structure
 
+TODO
+
 ```
-~/plex/
+~/imap_archive/
 ├── backup.sh              # Backup script
 ├── restore.sh             # Restore script
 ├── local_data_mnt/plex/   # Source data
@@ -155,20 +146,4 @@ ls -la ~/plex/plex_data_mnt/plex2/backups/
 
 # Progress
 
-* plex2 NAS mounting has migrated from sshfs -> SMB [DONE]
-* plex2 users `plex` and `arr` as well as `plexapp` group created [DONE]
-* plex2 running under `plex:plexapp`, replacing old plex deployment [DONE]
-* NAS mounted as `nobody:plexapp` [WON'T DO: plex doesn't like it...]
-* plex config now on non-NAS mount to avoid file locking issues [DONE]
-* Set up seedbox network namespace [DONE]
-* Run transmission in `seedbox` network namespace [WON'T DO: easier to run qBT with HTTP proxy]
-* Run arrs in seedbox network namespace [WON'T DO: arrs don't need to be proxied]
-* Run qBittorrent with HTTP proxy [DONE]
-* Run arrs & qBT in docker-compose [DONE]
-* Create backup scripts, run daily [DONE]
-* Set up libraries [DONE]
-* Run plex off of new libraries [DONE]
-* Actually route qBittorrent traffic via VPN using GlueTUN [DONE]
-* Fix download client connection issues: port forwarding? [DONE: switched to airVPN w/ port forwarding]
-* Set up overseerr [DONE]
-* Set up automatic collections using kometa [TODO]
+* Copy base files from plex-pms. These offer a bunch of utilities for Ops [DONE]
