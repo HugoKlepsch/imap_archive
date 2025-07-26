@@ -30,7 +30,7 @@ services:
       - ${roundcube_dir}/db:/var/roundcube/db
     environment:
       - ROUNDCUBEMAIL_DB_TYPE=sqlite
-      - ROUNDCUBEMAIL_DB_NAME=/var/roundcube/db/sqlite.db
+      - ROUNDCUBEMAIL_DB_NAME=roundcubemaildb
       - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://dovecot
       - ROUNDCUBEMAIL_DEFAULT_PORT=993
       - ROUNDCUBEMAIL_SMTP_SERVER=ssl://dovecot
