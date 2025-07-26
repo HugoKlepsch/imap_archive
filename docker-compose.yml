@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  dovecot:
+    image: dovecot/dovecot:latest
+    container_name: dovecot
+    restart: unless-stopped
+    ports:
+      - "143:143"   # IMAP
+      - "993:993"   # IMAPS
+      - "110:110"   # POP3 (optional)
+      - "995:995"   # POP3S (optional)
+    volumes:
+      - ./dovecot/conf:/etc/dovecot
+      - ./dovecot/mail:/var/mail
+      - ./dovecot/logs:/var/log/dovecot
+      - ./certs:/etc/ssl/certs/dovecot:ro
+    environment:
+      - DOVECOT_HOSTNAME=mail.yourdomain.com
+
+  roundcube:
+    image: roundcube/roundcubemail:latest
+    container_name: roundcube
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./roundcube/config:/var/roundcube/config
+      - ./roundcube/logs:/var/logs
+      - ./roundcube/db:/var/roundcube/db
+    environment:
+      - ROUNDCUBEMAIL_DB_TYPE=sqlite
+      - ROUNDCUBEMAIL_DB_NAME=/var/roundcube/db/sqlite.db
+      - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://dovecot
+      - ROUNDCUBEMAIL_DEFAULT_PORT=993
+      - ROUNDCUBEMAIL_SMTP_SERVER=ssl://dovecot
+      - ROUNDCUBEMAIL_SMTP_PORT=465
+    depends_on:
+      - dovecot
