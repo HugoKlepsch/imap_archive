@@ -33,8 +33,8 @@ Secrets are stored in `.env.bash` file. A template is provided in `.env.bash.tem
 ## Storage
 
 * All data is stored on my Synology NAS, mounted via Samba.
-* Application configs are not on the NAS-mounted drive, because they contain
-  SQLite DBs, and don't tend to work well with NAS mounts because they don't 
+* Application configs are not on the NAS-mounted drive because they contain
+  SQLite DBs and don't tend to work well with NAS mounts because they don't 
   support file locking properly.
 * Mounted as `nobody:imapapp`
 
@@ -95,7 +95,7 @@ TODO
 
 - Creates timestamped backup in `~/imap_archive/nas_data_mnt/backups/`
 - Excludes cache, logs, and temporary files
-- Keeps latest 30 days of backups
+- Keeps the latest 30 days of backups
 - Creates `latest_backup.tar.gz` symlink
 - Must be run as `imapapp:imapapp` user:group
 
