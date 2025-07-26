@@ -4,3 +4,5 @@
 /.idea/modules.xml
 /.idea/vcs.xml
 /.idea/dictionaries/project.xml
+generated_config/
+.env.bash
