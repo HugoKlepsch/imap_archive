@@ -6,15 +6,17 @@ services:
     container_name: dovecot
     restart: unless-stopped
     ports:
-      - "143:143"   # IMAP
-      - "993:993"   # IMAPS
-    # volumes:
-    #   - ${dovecot_dir}/conf:/etc/dovecot
-    #   - ${dovecot_dir}/mail:/var/mail
-    #   - ${dovecot_dir}/logs:/var/log/dovecot
-    #   - ${dovecot_certs_dir}/certs:/etc/dovecot/ssl:ro
+      - "31143:31143"   # IMAP
+      - "31993:31993"   # IMAPS
+      - "31080:8080"    # admin ui
+        # - "9090:9090"   # metrics
+    volumes:
+      - ${dovecot_dir}/srv/vmail:/srv/vmail
+      - ${dovecot_dir}/conf:/etc/dovecot/conf.d:ro
     environment:
       - DOVECOT_HOSTNAME=${dovecot_hostname}
+    networks:
+      - email-net
 
   roundcube:
     image: roundcube/roundcubemail:latest
@@ -30,8 +32,14 @@ services:
       - ROUNDCUBEMAIL_DB_TYPE=sqlite
       - ROUNDCUBEMAIL_DB_NAME=roundcubemaildb
       - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://dovecot
-      - ROUNDCUBEMAIL_DEFAULT_PORT=993
+      - ROUNDCUBEMAIL_DEFAULT_PORT=31993
       - ROUNDCUBEMAIL_SMTP_SERVER=ssl://dovecot
-      - ROUNDCUBEMAIL_SMTP_PORT=465
+      - ROUNDCUBEMAIL_SMTP_PORT=31465
     depends_on:
       - dovecot
+    networks:
+      - email-net
+
+networks:
+  email-net:
+    driver: bridge
