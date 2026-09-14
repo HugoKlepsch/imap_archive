@@ -8,3 +8,4 @@ generated_config/
 .env.bash
 local_data_mnt/
 nas_data_mnt/
+/.idea/
