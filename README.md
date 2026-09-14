@@ -142,22 +142,6 @@ sudo journalctl -u imap-archive-backup.service -n 20
 ls -la ~/imap_archive/nas_data_mnt/backups/
 ```
 
-## Directory Structure
-
-TODO
-
-```
-~/imap_archive/
-├── backup.sh              # Backup script
-├── restore.sh             # Restore script
-├── local_data_mnt/plex/   # Source data
-└── plex_data_mnt/plex2/backups/  # Backup destination
-    ├── plex_backup_YYYYMMDD_HHMMSS.tar.gz
-    ├── latest_backup.tar.gz -> (symlink to latest)
-    ├── backup.log
-    └── restore.log
-```
-
 # Progress
 
 * Copy base files from plex-pms. These offer a bunch of utilities for Ops [DONE]
