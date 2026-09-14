@@ -1,0 +1,22 @@
+# Global ACL file - read-only archive.
+#
+# Format: <mailbox pattern> <identifier> <rights>
+#
+# Rights granted:
+#   l  lookup  - folder is visible in the folder list
+#   r  read    - messages can be opened and fetched
+#   s  seen    - the \Seen flag can be set (so marking mail read works)
+#
+# Rights deliberately NOT granted:
+#   w  write   - other flags cannot be changed
+#   i  insert  - clients cannot append messages
+#   k  create  - clients cannot create folders
+#   x  delete  - clients cannot delete folders
+#   t  delete  - clients cannot set \Deleted on messages
+#   e  expunge - clients cannot expunge
+#   a  admin   - clients cannot change ACLs
+#
+# Applies to IMAP clients only. mbsync writes to the Maildir directly through
+# the filesystem and bypasses this entirely - which is how new mail still
+# arrives in a "read-only" archive.
+* owner lrs

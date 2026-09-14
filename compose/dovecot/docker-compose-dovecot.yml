@@ -1,0 +1,59 @@
+# Dovecot IMAP server for the Gmail archive.
+#
+# This stack never sends or receives mail. Messages arrive by mbsync writing
+# Maildir files directly onto the NAS share; Dovecot only serves them to
+# Thunderbird and Roundcube, read-only.
+#
+# Ports: the dovecot/dovecot image ships vendor.d/rootless.conf, which moves
+# the listeners to 31143/31993 because the process runs unprivileged as vmail
+# and cannot bind below 1024. The container side of every mapping below is
+# therefore a 31xxx port - that is correct, not a typo.
+
+name: imap-archive
+
+services:
+  dovecot:
+    image: dovecot/dovecot:${DOVECOT_VERSION:?set DOVECOT_VERSION in .env.bash}
+    container_name: imap_archive_dovecot
+    restart: unless-stopped
+    ports:
+      # Host side uses the standard IMAP ports so clients need no custom
+      # config; the docker daemon binds them as root on our behalf.
+      - "${IMAP_BIND_ADDR:-0.0.0.0}:${IMAP_PORT:-143}:31143"
+      - "${IMAP_BIND_ADDR:-0.0.0.0}:${IMAPS_PORT:-993}:31993"
+      # Deliberately NOT published:
+      #   8080 - doveadm HTTP admin API. Full mailbox control; reachable from
+      #          the compose network only. See docs/maintenance.md.
+      #   9090 - stats/metrics.
+    volumes:
+      # Our conf.d REPLACES the image's, which is intentional: the image ships
+      # a demo `passdb static` reading $USER_PASSWORD that would otherwise
+      # shadow the real passdb. Mounting the whole directory removes it.
+      - ../../config/dovecot/conf.d:/etc/dovecot/conf.d:ro
+      - ../../config/dovecot/acl-global:/etc/dovecot/acl-global:ro
+      # Generated from .env.bash by scripts/gen-secrets.sh. Never committed.
+      - ../../generated_config/dovecot:/etc/dovecot/generated:ro
+      # Written by scripts/renew-cert.sh (lego), on local disk.
+      - ${cert_dir}:/etc/dovecot/certs:ro
+
+      # ---- NAS (CIFS): the mail itself, and nothing else ----
+      - ${vmail_dir}:/srv/vmail
+
+      # ---- Local disk: everything Dovecot locks or mmaps ----
+      # Never move these onto the CIFS mount. See config/dovecot/conf.d/.
+      - ${index_dir}:/srv/index
+      - ${control_dir}:/srv/control
+      - ${volatile_dir}:/srv/volatile
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+      - DOVEADM_PASSWORD=${DOVEADM_PASSWORD:?set DOVEADM_PASSWORD in .env.bash}
+    networks:
+      archive-net:
+        aliases:
+          # Lets Roundcube connect as ssl://${MAIL_HOSTNAME} over the compose
+          # network, so the real certificate validates on the internal hop too.
+          - ${MAIL_HOSTNAME:?set MAIL_HOSTNAME in .env.bash}
+
+networks:
+  archive-net:
+    name: imap-archive-net

@@ -1,158 +1,170 @@
-#!/bin/bash -e
-# Create a systemd service that autostarts & manages a docker-compose instance in the current directory
-# by Uli Köhler - https://techoverflow.net
-# Licensed as CC0 1.0 Universal
-# Modified by Hugo Klepsch
+#!/bin/bash
+# Generate (and optionally install) the systemd units for the IMAP archive.
+#
+#   ./create-systemd-service.sh                        # generate only
+#   INSTALL=true ./create-systemd-service.sh           # generate + install
+#   INSTALL=true ENABLE_NOW=true ./create-systemd-service.sh   # + enable & start
+#
+# Units generated:
+#   <mount>.mount                  CIFS mount for the NAS share (the mail)
+#   imap-archive.service           Dovecot via docker compose
+#   imap-archive-cert.service      lego certificate issuance/renewal
+#   imap-archive-cert.timer        runs the above daily
+#
+# Originally by Uli Köhler (https://techoverflow.net), CC0 1.0 Universal.
+# Modified by Hugo Klepsch.
 
 set -euo pipefail
 
-SERVICENAME=$(basename $(pwd))
+cd "$(dirname "$0")"
 
-# Load variables
 ENV_FILE=".env.bash"
-
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Error: $ENV_FILE file not found." >&2
+  echo "Error: $ENV_FILE not found. Copy .env.bash.template and fill it in." >&2
   exit 1
 fi
 
-# Use 'set -a' to export all sourced variables to the environment
 set -a
 if ! source "$ENV_FILE"; then
-  echo "Error: Failed to source $ENV_FILE." >&2
+  echo "Error: failed to source $ENV_FILE." >&2
   exit 1
 fi
 set +a
 echo "$ENV_FILE loaded successfully."
 
-# Create generated_config directory, where the generated unit files go before they are installed
+: "${smb_host:?not set}"; : "${smb_drive:?not set}"; : "${nas_mount_dir:?not set}"
+: "${smb_creds_file:?not set}"; : "${MAIL_HOSTNAME:?not set}"
+
+COMPOSE="$(command -v docker-compose || echo "$(command -v docker) compose")"
+
 GEN_DIR="$(pwd)/generated_config"
 mkdir -p "${GEN_DIR}"
 echo "Generated units are written to ${GEN_DIR}/ before installation"
 
-# Generate the systemd mount unit name
+########################################
+# NAS mount unit
+########################################
+# systemd derives a mount unit's name from its mount point, so this has to be
+# computed rather than hardcoded: /a/b/c -> a-b-c.mount
 mount_dir_path="$(pwd)/${nas_mount_dir}"
-# Strip leading slash, replace slashes with dashes and append ".mount"
 mount_unit_name="${mount_dir_path#/}"
 mount_unit_name="${mount_unit_name//\//-}.mount"
 echo "Creating systemd NAS mount... ${mount_unit_name}"
-# Create systemd mount file
+
 cat >"${GEN_DIR}/${mount_unit_name}" <<EOF
 [Unit]
-Description=IMAP archive NAS mount
+Description=IMAP archive NAS mount (message storage)
 After=network-online.target
 Requires=network-online.target
-Restart=on-failure
-RestartSec=10
-# 60 attempts 10 seconds apart = 10 minutes minimum. Might be longer due to TimeoutSec
-StartLimitBurst=60
 
 [Mount]
 What=//${smb_host}/${smb_drive}
 Where=${mount_dir_path}
 Type=cifs
-Options=credentials=/etc/samba/creds_imap_archive,uid=${nas_mount_user},gid=${nas_mount_group},file_mode=0775,dir_mode=0775,iocharset=utf8,nofail
+Options=credentials=${smb_creds_file},uid=${nas_mount_user},gid=${nas_mount_group},file_mode=0664,dir_mode=0775,iocharset=utf8,nofail,_netdev
 TimeoutSec=30
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+########################################
+# Dovecot service
+########################################
 imap_unit_name="imap-archive.service"
-echo "Creating imap-archive systemd service... ${imap_unit_name}"
-# Create systemd service file
+echo "Creating Dovecot systemd service... ${imap_unit_name}"
+
+# RequiresMountsFor is the important part: if the NAS share is not mounted,
+# Dovecot must not start. Without it, docker would happily bind-mount the
+# empty local directory that the mount point is when unmounted, and Dovecot
+# would come up serving an empty archive - which looks exactly like data loss.
 cat >"${GEN_DIR}/${imap_unit_name}" <<EOF
 [Unit]
-Description=Run local IMAP server and webUI in docker compose
+Description=IMAP archive (Dovecot) in docker compose
 After=${mount_unit_name} docker.service network-online.target
-Requires=${mount_unit_name} docker.service network-online.target
+Requires=${mount_unit_name} docker.service
+RequiresMountsFor=${mount_dir_path}
 
 [Service]
+Type=simple
 RestartSec=10
 Restart=always
 User=root
 Group=docker
 WorkingDirectory=$(pwd)
-# Shutdown container (if running) when unit is started
-ExecStartPre=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml down"
-# Start container when unit is started
-ExecStart=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml up"
-# Stop container when unit is stopped
-ExecStop=/bin/bash -c ". ${ENV_FILE}; $(which docker-compose) -f docker-compose.yml down"
+ExecStartPre=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/dovecot/docker-compose-dovecot.yml down"
+ExecStart=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/dovecot/docker-compose-dovecot.yml up"
+ExecStop=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/dovecot/docker-compose-dovecot.yml down"
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-backup_service_unit_name="imap-archive-backup.service"
-echo "Creating backup systemd service... ${backup_service_unit_name}"
-# Create systemd service file
-cat >"${GEN_DIR}/${backup_service_unit_name}" <<EOF
+########################################
+# Certificate renewal
+########################################
+cert_service_unit_name="imap-archive-cert.service"
+cert_timer_unit_name="imap-archive-cert.timer"
+echo "Creating certificate renewal service... ${cert_service_unit_name}"
+
+cat >"${GEN_DIR}/${cert_service_unit_name}" <<EOF
 [Unit]
-Description=IMAP archive data backup service
-After=${mount_unit_name}
-Requires=${mount_unit_name}
+Description=Renew the IMAP archive TLS certificate (ACME DNS-01 via Linode)
+After=network-online.target docker.service
+Requires=network-online.target docker.service
 
 [Service]
 Type=oneshot
-User=imapapp
-Group=imapapp
+User=root
+Group=docker
 WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/backup.sh
+ExecStart=$(pwd)/scripts/renew-cert.sh
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-backup_timer_unit_name="imap-archive-backup.timer"
-echo "Creating backup systemd timer... ${backup_timer_unit_name}"
-# Create systemd service file
-cat >"${GEN_DIR}/${backup_timer_unit_name}" <<EOF
+echo "Creating certificate renewal timer... ${cert_timer_unit_name}"
+cat >"${GEN_DIR}/${cert_timer_unit_name}" <<EOF
 [Unit]
-Description=Run IMAP archive data backup daily
-Requires=${backup_service_unit_name}
+Description=Check the IMAP archive TLS certificate daily
+Requires=${cert_service_unit_name}
 
 [Timer]
 OnCalendar=daily
-RandomizedDelaySec=1800
+RandomizedDelaySec=3600
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 EOF
 
-if [[ "${INSTALL:-false}" == "true" ]]; then
-	echo "Installing systemd samba mount... /etc/systemd/system/${mount_unit_name}"
-	sudo cp "${GEN_DIR}/${mount_unit_name}" "/etc/systemd/system/${mount_unit_name}"
-
-	echo "Installing imap-archive systemd service... /etc/systemd/system/${imap_unit_name}"
-	sudo cp "${GEN_DIR}/${imap_unit_name}" "/etc/systemd/system/${imap_unit_name}"
-
-  # TODO: backup/restore is not implemented yet
-	# echo "Installing imap-archive backup service... /etc/systemd/system/${backup_service_unit_name}"
-	# sudo cp "${GEN_DIR}/${backup_service_unit_name}" "/etc/systemd/system/${backup_service_unit_name}"
-
-	# echo "Installing imap-archive backup timer... /etc/systemd/system/${backup_timer_unit_name}"
-	# sudo cp "${GEN_DIR}/${backup_timer_unit_name}" "/etc/systemd/system/${backup_timer_unit_name}"
-
-	sudo systemctl daemon-reload
-
-	if [[ "${ENABLE_NOW:-false}" == "true" ]]; then
-		echo "Enabling & starting ${mount_unit_name}, ${imap_unit_name}, ${backup_service_unit_name}, ${backup_timer_unit_name}"
-		# Start systemd units on startup (and right now)
-		sudo systemctl enable --now "${mount_unit_name}"
-		sudo systemctl enable --now "${imap_unit_name}"
-		# Note: you only need to enable/start the timer, not the service it runs
-		# TODO: backup/restore is not implemented yet
-		# sudo systemctl enable --now "${backup_timer_unit_name}"
-		exit 0
-	else
-		echo "Run with INSTALL=true ENABLE_NOW=true ./create... to install and start and enable"
-		exit 0
-	fi
-else
-	echo "Run with INSTALL=true ./create... to install"
-	exit 0
+########################################
+# Install
+########################################
+if [[ "${INSTALL:-false}" != "true" ]]; then
+  echo
+  echo "Run with INSTALL=true ./create-systemd-service.sh to install."
+  exit 0
 fi
 
-exit 0
+for unit in "${mount_unit_name}" "${imap_unit_name}" \
+            "${cert_service_unit_name}" "${cert_timer_unit_name}"; do
+  echo "Installing /etc/systemd/system/${unit}"
+  sudo cp "${GEN_DIR}/${unit}" "/etc/systemd/system/${unit}"
+done
+
+sudo systemctl daemon-reload
+
+if [[ "${ENABLE_NOW:-false}" != "true" ]]; then
+  echo
+  echo "Installed. Run with INSTALL=true ENABLE_NOW=true to enable & start."
+  exit 0
+fi
+
+echo "Enabling & starting units..."
+sudo systemctl enable --now "${mount_unit_name}"
+sudo systemctl enable --now "${imap_unit_name}"
+# Only the timer is enabled; it pulls in the service it runs.
+sudo systemctl enable --now "${cert_timer_unit_name}"
+echo "Done."
