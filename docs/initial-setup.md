@@ -1,7 +1,7 @@
 # Initial setup
 
-Setting the archive up on a fresh server. Phase 1 only — Roundcube, the Gmail
-sync and backups are not built yet.
+Setting the archive up on a fresh server. Phases 1–2 — the Gmail sync and the
+offsite backup are not built yet.
 
 Commands run on the server, from the repo root, unless stated otherwise.
 
@@ -41,16 +41,18 @@ password=bar
 
 ## 3. DNS
 
-Point the archive's hostname at the server's **private** address:
+Add the hostname to the **local resolver** (pihole), pointing at this server —
+the same arrangement as `immich.hugo-klepsch.tech` and the other home-portal
+hosts:
 
 ```
 mail.hugo-klepsch.tech.   A   10.8.0.22
 ```
 
-A private address in public DNS is intentional and safe here. Certificates are
-issued over DNS-01, which proves control of the name by writing a TXT record —
-no inbound connection from the internet is ever needed, so nothing is exposed
-by the record existing.
+Do **not** add it to the public Linode zone. DNS-01 still works: the only
+record that has to be publicly visible is the short-lived `_acme-challenge`
+TXT record, which lego creates and deletes through the Linode API. Nothing
+about this host becomes reachable from the internet.
 
 ## 4. Configuration
 
@@ -90,7 +92,8 @@ local-disk directories must exist before Dovecot starts.
 
 ```bash
 set -a; source .env.bash; set +a
-mkdir -p "${nas_mount_dir}" "${index_dir}" "${control_dir}" "${volatile_dir}" "${cert_dir}"
+mkdir -p "${nas_mount_dir}" "${index_dir}" "${control_dir}" "${volatile_dir}" \
+         "${cert_dir}" "${roundcube_db_dir}"
 sudo chown -R imapapp:imapapp "${local_mount_dir}"
 sudo chmod -R 0770 "${local_mount_dir}"
 ```
@@ -156,7 +159,54 @@ Three things to confirm:
 2. `a OK ... Logged in` — the passwd-file and hash are correct.
 3. Run the read-only check in [maintenance.md](maintenance.md#verifying-the-archive-is-still-read-only).
 
-## 11. Thunderbird
+## 11. Roundcube
+
+```bash
+sudo systemctl enable --now imap-archive-roundcube
+sudo journalctl -u imap-archive-roundcube -f
+```
+
+First start takes longer than you expect — the entrypoint extracts the
+application into an empty document root every time. That is deliberate: no
+state lives there, so the upgrade path never has to run.
+
+Check it directly on the host port before involving Caddy:
+
+```bash
+curl -sI http://127.0.0.1:8083/ | head -1     # expect 200
+```
+
+### Caddyfile entry
+
+Roundcube is served by the **home-portal** Caddy, which already holds a
+`*.hugo-klepsch.tech` wildcard, so no new certificate work is needed. Add this
+to `~/git/home-portal/Caddyfile`, in alphabetical position inside the
+`*.hugo-klepsch.tech` block:
+
+```caddy
+	@mail host mail.hugo-klepsch.tech
+	handle @mail {
+		reverse_proxy 10.8.0.22:8083
+	}
+```
+
+Then reload it from the home-portal repo:
+
+```bash
+cd ~/git/home-portal
+docker compose -f compose/docker-compose.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Visit `https://mail.hugo-klepsch.tech` from the home network or the VPN and log
+in as `archive`. There is no Compose button — there is no MTA in this stack and
+the UI has it removed rather than offering an action that would fail.
+
+Two certificates are in play at this point, which is expected: Caddy serves the
+web UI with its wildcard, while Dovecot serves IMAPS with the single-name
+certificate lego issued. They are requested independently and their ACME
+challenge records never collide.
+
+## 12. Thunderbird
 
 | Setting             | Value                    |
 |---------------------|--------------------------|
@@ -171,6 +221,6 @@ Thunderbird will show the folders as read-only. That is correct.
 
 ## What is not set up yet
 
-Phases 2–4 (Roundcube, Gmail sync, verification, offsite backup) are not built.
+Phases 3–4 (Gmail sync, verification, offsite backup) are not built.
 **Nothing should be deleted from Gmail until phase 4 is complete and a restore
 has actually been tested.**

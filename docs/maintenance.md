@@ -5,11 +5,17 @@ Day-to-day operation. Run from the repo root on the server.
 ## Service control
 
 ```bash
-sudo systemctl status imap-archive
+sudo systemctl status imap-archive              # Dovecot
+sudo systemctl status imap-archive-roundcube    # web UI
 sudo systemctl restart imap-archive
 sudo journalctl -u imap-archive -f
 sudo journalctl -u imap-archive --since "1 hour ago"
 ```
+
+Roundcube is a separate unit so it can be restarted without interrupting
+Thunderbird sessions. It `Requires` the Dovecot unit because it joins the
+docker network that project creates, so restarting Dovecot alone can leave the
+web UI briefly unable to connect; restart it afterwards if the UI errors.
 
 Timers:
 
@@ -50,6 +56,35 @@ set -a; source .env.bash; set +a
 docker exec imap_archive_dovecot doveadm mailbox status -u "${ARCHIVE_USER}" messages '*'
 du -sh "${vmail_dir}" "${local_mount_dir}"
 ```
+
+## Roundcube
+
+```bash
+curl -sI http://127.0.0.1:8083/ | head -1                 # direct, bypassing Caddy
+curl -sI https://mail.hugo-klepsch.tech/ | head -1        # through home-portal
+docker logs imap_archive_roundcube --tail 50
+```
+
+If the direct call works and the proxied one does not, the problem is in
+home-portal's Caddyfile or the local DNS record, not in this stack.
+
+**"Connection to storage server failed"** means Roundcube could not reach
+Dovecot. It connects to `MAIL_HOSTNAME` over the compose network — which is a
+network alias on the dovecot service — so the causes are, in order: Dovecot is
+down; the network was recreated without restarting Roundcube; or the
+certificate no longer matches `MAIL_HOSTNAME`. Peer verification is on
+deliberately, so a name mismatch is a hard failure rather than a warning.
+
+```bash
+docker exec imap_archive_roundcube getent hosts mail.hugo-klepsch.tech
+```
+
+**Logged out constantly** usually means `ROUNDCUBE_DES_KEY` changed, which
+invalidates every existing session. That is harmless — log in again.
+
+**Wrong redirect URLs, or a login loop behind Caddy**, means
+`ROUNDCUBE_TRUSTED_PROXIES` does not list the address Caddy's traffic actually
+arrives from. Check it against `ip -4 addr show docker0`.
 
 ## Verifying the archive is still read-only
 
@@ -126,6 +161,27 @@ Losing `mail_control_path` is recoverable but not free: it holds
 `dovecot-uidlist`, the UID-to-filename map. Regenerating it gives every message
 a new IMAP UID, so clients treat the whole archive as new and re-download it.
 No mail is lost. This is why the control directory is included in backups.
+
+## Upgrading Roundcube
+
+The document root is not persisted — the entrypoint re-extracts the
+application on every start — so an upgrade is only a version bump:
+
+```bash
+vim .env.bash                 # bump ROUNDCUBE_VERSION
+sudo systemctl restart imap-archive-roundcube
+```
+
+The SQLite database is persisted and migrated automatically on start. Check
+`config/roundcube/custom.inc.php` still applies afterwards: the settings it
+uses (`disabled_actions`, `proxy_whitelist`, `imap_conn_options`) are stable,
+but a major version could rename them, and a silently ignored
+`disabled_actions` would put the Compose button back.
+
+```bash
+docker exec imap_archive_roundcube \
+  grep -c "custom.inc.php" /var/www/html/config/config.docker.inc.php   # expect 1
+```
 
 ## Upgrading Dovecot
 

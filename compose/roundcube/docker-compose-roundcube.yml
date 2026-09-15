@@ -1,0 +1,73 @@
+# Roundcube web UI for the Gmail archive.
+#
+# Served at https://${MAIL_HOSTNAME} by the home-portal Caddy, which terminates
+# TLS with its *.hugo-klepsch.tech wildcard and reverse-proxies to the host
+# port published below - the same pattern as immich, bazarr and the rest. See
+# docs/initial-setup.md for the Caddyfile entry.
+#
+# Reachable on the home network and VPN only. Nothing here is public.
+
+name: imap-archive-roundcube
+
+services:
+  roundcube:
+    image: roundcube/roundcubemail:${ROUNDCUBE_VERSION:?set ROUNDCUBE_VERSION in .env.bash}
+    container_name: imap_archive_roundcube
+    restart: unless-stopped
+    ports:
+      # Caddy connects to this from the host, so bind it on the docker bridge
+      # rather than all interfaces. ROUNDCUBE_BIND_ADDR can be narrowed further.
+      - "${ROUNDCUBE_BIND_ADDR:-0.0.0.0}:${ROUNDCUBE_PORT:-8083}:80"
+    volumes:
+      # Anything matching *.php here is included after the generated config,
+      # so it has the last word.
+      - ../../config/roundcube:/var/roundcube/config:ro
+      # SQLite: user preferences, contacts, session store. Small, but it is a
+      # SQLite database and therefore must NOT live on the CIFS share - same
+      # file-locking reason as Dovecot's indexes.
+      - ${roundcube_db_dir}:/var/roundcube/db
+      # Note: /var/www/html is deliberately NOT persisted. The entrypoint
+      # re-extracts the application on every start, which costs a few seconds
+      # and avoids the composer-based in-place upgrade path entirely. All real
+      # state is in the SQLite database above and in IMAP.
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+
+      # Reached over the compose network. MAIL_HOSTNAME is a network alias on
+      # the dovecot service, so the real certificate validates here too.
+      # 31993 is the CONTAINER-side IMAPS port (see the dovecot compose file);
+      # we are not going back out through the host's 993 mapping.
+      - ROUNDCUBEMAIL_DEFAULT_HOST=ssl://${MAIL_HOSTNAME:?set MAIL_HOSTNAME in .env.bash}
+      - ROUNDCUBEMAIL_DEFAULT_PORT=31993
+
+      # No SMTP server exists in this stack and none is wanted. Sending is
+      # removed from the UI by config/roundcube/custom.inc.php.
+
+      - ROUNDCUBEMAIL_DB_TYPE=sqlite
+      - ROUNDCUBEMAIL_DB_DIR=/var/roundcube/db
+      - ROUNDCUBEMAIL_DB_NAME=roundcube
+
+      # The default plugin set includes `archive`, which moves messages between
+      # folders - every use of it would be refused by Dovecot's ACL. Only
+      # zipdownload is kept: it is the useful one here, for exporting a
+      # selection of messages out of the archive.
+      - ROUNDCUBEMAIL_PLUGINS=zipdownload
+      - ROUNDCUBEMAIL_SKIN=elastic
+
+      # Encrypts session data and stored IMAP credentials. Exactly 24 bytes.
+      - ROUNDCUBEMAIL_DES_KEY=${ROUNDCUBE_DES_KEY:?set ROUNDCUBE_DES_KEY in .env.bash}
+
+      # Read by config/roundcube/custom.inc.php.
+      - ROUNDCUBE_TRUSTED_PROXIES=${ROUNDCUBE_TRUSTED_PROXIES:-172.17.0.1}
+      - MAIL_HOSTNAME=${MAIL_HOSTNAME}
+
+      # Attachments in a 15-year Gmail archive can be large.
+      - ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE=${ROUNDCUBE_MAX_FILESIZE:-64M}
+    networks:
+      - archive-net
+
+networks:
+  # Created by the dovecot compose file; joined here.
+  archive-net:
+    name: imap-archive-net
+    external: true

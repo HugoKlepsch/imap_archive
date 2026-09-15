@@ -8,6 +8,7 @@
 # Units generated:
 #   <mount>.mount                  CIFS mount for the NAS share (the mail)
 #   imap-archive.service           Dovecot via docker compose
+#   imap-archive-roundcube.service Roundcube web UI via docker compose
 #   imap-archive-cert.service      lego certificate issuance/renewal
 #   imap-archive-cert.timer        runs the above daily
 #
@@ -101,6 +102,38 @@ WantedBy=multi-user.target
 EOF
 
 ########################################
+# Roundcube service
+########################################
+roundcube_unit_name="imap-archive-roundcube.service"
+echo "Creating Roundcube systemd service... ${roundcube_unit_name}"
+
+# Kept as its own unit rather than folded into imap-archive.service so the web
+# UI can be restarted without interrupting Thunderbird sessions. It Requires
+# the Dovecot unit because it joins the docker network that project creates,
+# and BindsTo would be too aggressive - a Dovecot restart should not tear this
+# down permanently.
+cat >"${GEN_DIR}/${roundcube_unit_name}" <<EOF
+[Unit]
+Description=IMAP archive web UI (Roundcube) in docker compose
+After=${imap_unit_name} docker.service network-online.target
+Requires=${imap_unit_name} docker.service
+
+[Service]
+Type=simple
+RestartSec=10
+Restart=always
+User=root
+Group=docker
+WorkingDirectory=$(pwd)
+ExecStartPre=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/roundcube/docker-compose-roundcube.yml down"
+ExecStart=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/roundcube/docker-compose-roundcube.yml up"
+ExecStop=/bin/bash -c ". ${ENV_FILE}; ${COMPOSE} -f compose/roundcube/docker-compose-roundcube.yml down"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+########################################
 # Certificate renewal
 ########################################
 cert_service_unit_name="imap-archive-cert.service"
@@ -148,7 +181,7 @@ if [[ "${INSTALL:-false}" != "true" ]]; then
   exit 0
 fi
 
-for unit in "${mount_unit_name}" "${imap_unit_name}" \
+for unit in "${mount_unit_name}" "${imap_unit_name}" "${roundcube_unit_name}" \
             "${cert_service_unit_name}" "${cert_timer_unit_name}"; do
   echo "Installing /etc/systemd/system/${unit}"
   sudo cp "${GEN_DIR}/${unit}" "/etc/systemd/system/${unit}"
@@ -165,6 +198,7 @@ fi
 echo "Enabling & starting units..."
 sudo systemctl enable --now "${mount_unit_name}"
 sudo systemctl enable --now "${imap_unit_name}"
+sudo systemctl enable --now "${roundcube_unit_name}"
 # Only the timer is enabled; it pulls in the service it runs.
 sudo systemctl enable --now "${cert_timer_unit_name}"
 echo "Done."

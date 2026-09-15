@@ -30,9 +30,11 @@ are making.
   (IMAP, app password)                        │
                                               │  read-only
                                               ▼
-                                        Dovecot  ──► Thunderbird  (IMAPS 993)
-                                              │      Roundcube    (phase 2)
-                                              │
+                                        Dovecot ──────► Thunderbird (IMAPS 993)
+                                              │  ▲
+                                              │  └── Roundcube ◄── home-portal
+                                              │        (web UI)      Caddy, TLS
+                                              │                   https://mail...
                                               └──── restic ──► object storage
                                                     (phase 4)
 ```
@@ -42,8 +44,6 @@ straight onto the share; Dovecot notices them on its next scan. This is why
 the archive can be read-only over IMAP and still grow.
 
 ## Where things live, and why it matters
-
-This is the detail most likely to cause trouble if forgotten.
 
 | What                       | Where                                | Why                                                                                         |
 |----------------------------|--------------------------------------|---------------------------------------------------------------------------------------------|
@@ -70,6 +70,22 @@ appear to work and then quietly corrupt mailboxes.
 - **ACL-enforced read-only.** Clients get lookup, read, and `\Seen`. No delete,
   no expunge, no folder creation. A stray drag in Thunderbird cannot destroy
   the only copy. Verify with `docs/maintenance.md`.
+- **The web UI is fronted by home-portal, not by this stack.** Roundcube is
+  published on a plain host port and the home-portal Caddy terminates TLS for
+  `mail.hugo-klepsch.tech` with its existing `*.hugo-klepsch.tech` wildcard —
+  the same pattern as immich, bazarr and the rest. Home wifi and VPN only.
+- **The hostname is not in public DNS.** Its A record lives only in the local
+  resolver. DNS-01 still works because the only publicly visible record is the
+  short-lived `_acme-challenge` TXT record that lego creates and removes.
+- **Dovecot gets its own certificate, separate from Caddy's wildcard.** Caddy
+  is an HTTP proxy and cannot serve IMAPS, and having Dovecot terminate TLS
+  itself preserves client IPs in the logs. The two ACME clients request
+  different names (`*.hugo-klepsch.tech` versus `mail.hugo-klepsch.tech`), so
+  their challenge records never collide.
+- **Roundcube reaches Dovecot by `MAIL_HOSTNAME` over the compose network**,
+  which is a network alias on the dovecot service. The real certificate
+  therefore validates on the internal hop too, so peer verification stays on
+  instead of being disabled.
 - **Ports are 31143/31993 inside the container.** The upstream image ships
   `vendor.d/rootless.conf` which moves them there, because Dovecot runs
   unprivileged as `vmail` and cannot bind below 1024. The compose file maps
