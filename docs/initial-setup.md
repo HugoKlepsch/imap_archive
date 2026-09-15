@@ -1,7 +1,6 @@
 # Initial setup
 
-Setting the archive up on a fresh server. Phases 1–3 — the offsite backup
-(phase 4) is not built yet.
+Setting the archive up on a fresh server. All four phases.
 
 Commands run on the server, from the repo root, unless stated otherwise.
 
@@ -272,7 +271,100 @@ sudo systemctl enable --now imap-archive-sync.timer
 systemctl list-timers 'imap-archive*'
 ```
 
-## 13. Thunderbird
+## 13. Backup, verify, and only then delete
+
+This is the gate. Everything before it is reversible because Gmail still holds
+the originals; after it, this archive is the only copy.
+
+### Back up
+
+```bash
+./scripts/backup.sh
+```
+
+The first run uploads the whole archive and can take hours. Store
+`RESTIC_PASSWORD` somewhere that is not this server — without it the repository
+is permanently unreadable.
+
+### Prove the backup restores
+
+```bash
+./scripts/check-backup.sh     # re-reads and checksums a sample of the data
+./scripts/restore.sh          # test restore into a scratch directory
+```
+
+Read the restore output. It must show matching counts, a readable sample
+message, and `.mbsyncstate` present.
+
+### Verify the archive against Gmail
+
+```bash
+FULL=true SAMPLE_SIZE=500 ./scripts/verify-archive.sh
+```
+
+Read-only on both sides. It checks three things:
+
+1. **Counts** — Gmail vs files on disk vs what Dovecot serves.
+2. **Coverage** (`FULL=true`) — every Gmail Message-ID present in the archive.
+3. **Content** — a random sample compared field by field: Subject, From, To,
+   Date, decoded body text, and each attachment's filename, size and SHA-256.
+
+It compares *parsed* content rather than raw bytes, because mbsync legitimately
+rewrites CRLF to LF and adds an `X-TUID` header. A byte comparison would report
+every message as corrupt.
+
+Exit code 0 and `PASS` means no discrepancies. Anything else stops here.
+
+### Enable the timers
+
+```bash
+sudo systemctl enable --now imap-archive-backup.timer
+sudo systemctl enable --now imap-archive-check.timer
+systemctl list-timers 'imap-archive*'
+```
+
+### Then, and only then
+
+Delete from Gmail — in batches, re-running `verify-archive.sh` as you go. Note
+that once messages are gone from Gmail the count check will legitimately show
+the archive holding *more* than Gmail; that is expected and reported as such.
+
+## 14. Alerting
+
+Nothing else in this stack tells you when a timer quietly stops working, and a
+backup that has been failing for six months is worse than no backup because it
+is trusted.
+
+Create a webhook in Discord under **Server Settings -> Integrations -> Webhooks**,
+put the URL in `DISCORD_WEBHOOK_URL`, and test it:
+
+```bash
+vim .env.bash     # DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+./scripts/notify-discord.sh --test
+```
+
+You should get a blue "Test notification" in the channel. Then reinstall the
+units so every one of them picks up the `OnFailure=` hook:
+
+```bash
+INSTALL=true ./create-systemd-service.sh
+sudo systemctl daemon-reload
+```
+
+Every unit - the NAS mount, Dovecot, Roundcube, the sync, the backup, the
+verification and the certificate renewal - now carries
+`OnFailure=imap-archive-alert@%n.service`, which posts the failure and the last
+25 journal lines.
+
+`DISCORD_HEARTBEAT="true"` additionally posts a green message after each weekly
+backup verification. That exists because silence is ambiguous: it means either
+"everything is fine" or "the timer stopped running in June". One message a week
+tells those apart. Set it to `false` for failures only.
+
+Leaving `DISCORD_WEBHOOK_URL` empty disables alerting entirely - the notifier
+does nothing and exits cleanly.
+
+## 15. Thunderbird
 
 | Setting             | Value                    |
 |---------------------|--------------------------|

@@ -59,8 +59,9 @@ will corrupt Dovecot's index and control files. Do not move them.
 | 3     | mbsync pulling Gmail                     | Not built |
 | 4     | Verification + restic offsite backup     | Not built |
 
-**Nothing has been deleted from Gmail, and nothing should be until phase 4 is
-finished and a restore has been tested.**
+**Nothing should be deleted from Gmail until the backup, restore and
+verification scripts have all been run and passed.** See
+[docs/initial-setup.md](docs/initial-setup.md) step 13.
 
 ## Quick reference
 
@@ -71,4 +72,9 @@ sudo journalctl -u imap-archive -f
 sudo ./scripts/renew-cert.sh             # certificate (also on a daily timer)
 sudo ./scripts/sync-gmail.sh             # pull from Gmail (also on a daily timer)
 LIST=true sudo ./scripts/sync-gmail.sh   # list Gmail folders, read-only
+./scripts/backup.sh                      # offsite backup (also on a timer)
+./scripts/check-backup.sh                # verify the backup really restores
+./scripts/restore.sh                     # test restore to a scratch dir
+FULL=true ./scripts/verify-archive.sh    # compare the archive against Gmail
+./scripts/notify-discord.sh --test       # confirm alerting still works
 ```

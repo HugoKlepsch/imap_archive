@@ -108,8 +108,16 @@ appear to work and then quietly corrupt mailboxes.
 | 3     | mbsync pulling Gmail                     | Not built |
 | 4     | Verification, restic offsite backup      | Not built |
 
-Nothing has been deleted from Gmail, and nothing should be until phase 4 is
-finished and a restore has been tested.
+All four phases are built. Nothing should be deleted from Gmail until
+`scripts/backup.sh`, `scripts/restore.sh` and `scripts/verify-archive.sh` have
+all been run and passed — see [initial-setup.md](initial-setup.md) step 13.
+
+## When something breaks
+
+Every unit posts to a Discord webhook on failure, with the last 25 journal
+lines, and the weekly backup verification posts a heartbeat on success so that
+silence is not ambiguous. Configure it with `DISCORD_WEBHOOK_URL`; leave it
+empty to disable.
 
 ## Where to go next
 

@@ -226,6 +226,77 @@ Losing `mail_control_path` is recoverable but not free: it holds
 a new IMAP UID, so clients treat the whole archive as new and re-download it.
 No mail is lost. This is why the control directory is included in backups.
 
+## Backups
+
+```bash
+./scripts/backup.sh                    # run now (daily timer)
+./scripts/check-backup.sh              # verify data (weekly timer)
+./scripts/restore.sh                   # test restore to a scratch dir
+sudo journalctl -u imap-archive-backup -n 50
+systemctl list-timers 'imap-archive*'
+```
+
+Both scripts refuse to run without `RESTIC_PASSWORD`, and `backup.sh` refuses
+if the NAS is not mounted — an empty snapshot plus retention would eventually
+age out the last good one.
+
+**Check the timers are actually firing.** This is the failure mode the whole
+backup exists to avoid, and nothing currently alerts on it:
+
+```bash
+systemctl list-timers 'imap-archive*'          # LAST column should be recent
+systemctl is-failed imap-archive-backup.service
+```
+
+## Alerting
+
+```bash
+./scripts/notify-discord.sh --test          # confirm the webhook still works
+```
+
+Every unit carries `OnFailure=imap-archive-alert@%n.service`. A failure posts a
+red embed with the unit name, the `Result` systemd recorded, and the last 25
+journal lines.
+
+The notifier **always exits 0**, even when delivery fails. A failure handler
+that can itself fail is a loop, and a broken webhook should not turn one failed
+unit into two. The consequence is that a silently broken webhook looks exactly
+like "nothing has failed" - which is what the weekly heartbeat is for.
+
+Check delivery is genuinely working:
+
+```bash
+sudo journalctl -u 'imap-archive-alert@*' -n 30
+```
+
+`notify-discord: delivery failed, HTTP 404` means the webhook was deleted in
+Discord; `HTTP 429` means rate limiting.
+
+### Why this uses host tools
+
+`notify-discord.sh` runs `curl`, `jq` and `journalctl` on the host rather than
+in a container like everything else here. If docker is what broke, a
+docker-based alert would fail at exactly the moment it is needed. Those three
+binaries are a hard requirement on the server.
+
+## Verifying against Gmail
+
+```bash
+./scripts/verify-archive.sh                        # counts + 50-message sample
+FULL=true SAMPLE_SIZE=500 ./scripts/verify-archive.sh
+```
+
+Read-only on both sides; safe to run any time. Worth repeating periodically
+while Gmail still has the originals, and during any batch deletion.
+
+Once you have deleted from Gmail, the count check will report the archive
+holding **more** messages than Gmail. That is correct and expected. What still
+matters is the sample comparison and, if anything is odd, `FULL=true` coverage.
+
+If it reports mismatches, do not delete anything further. `MISSING` means
+`sync-gmail.sh` has not caught up; content mismatches mean something corrupted
+a message in place, which is what the backup is for.
+
 ## Upgrading Roundcube
 
 The document root is not persisted — the entrypoint re-extracts the

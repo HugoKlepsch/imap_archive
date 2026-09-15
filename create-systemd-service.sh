@@ -6,11 +6,16 @@
 #   INSTALL=true ENABLE_NOW=true ./create-systemd-service.sh   # + enable & start
 #
 # Units generated:
+#   imap-archive-alert@.service    Discord alert, triggered by OnFailure=
 #   <mount>.mount                  CIFS mount for the NAS share (the mail)
 #   imap-archive.service           Dovecot via docker compose
 #   imap-archive-roundcube.service Roundcube web UI via docker compose
 #   imap-archive-sync.service      mbsync pull from Gmail
 #   imap-archive-sync.timer        runs the above daily (not auto-enabled)
+#   imap-archive-backup.service    restic backup to object storage
+#   imap-archive-backup.timer      runs the above daily (not auto-enabled)
+#   imap-archive-check.service     restic data verification
+#   imap-archive-check.timer       runs the above weekly (not auto-enabled)
 #   imap-archive-cert.service      lego certificate issuance/renewal
 #   imap-archive-cert.timer        runs the above daily
 #
@@ -45,6 +50,34 @@ mkdir -p "${GEN_DIR}"
 echo "Generated units are written to ${GEN_DIR}/ before installation"
 
 ########################################
+# Alerting
+########################################
+# A template unit: OnFailure=imap-archive-alert@%n.service passes the failed
+# unit's name as the instance, so one unit covers everything.
+#
+# This unit deliberately has NO OnFailure of its own - a failure handler that
+# can itself trigger a failure handler is a loop. notify-discord.sh also always
+# exits 0 for the same reason.
+alert_unit_name="imap-archive-alert@.service"
+echo "Creating alert template unit... ${alert_unit_name}"
+
+cat >"${GEN_DIR}/${alert_unit_name}" <<EOF
+[Unit]
+Description=Discord alert for %i
+# Do not add OnFailure here.
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/scripts/notify-discord.sh --failure %i
+EOF
+
+# Every unit below gets this. The mount is included because a silent mount
+# failure is what makes Dovecot serve an empty archive.
+ON_FAILURE="OnFailure=imap-archive-alert@%n.service"
+
+########################################
 # NAS mount unit
 ########################################
 # systemd derives a mount unit's name from its mount point, so this has to be
@@ -59,6 +92,7 @@ cat >"${GEN_DIR}/${mount_unit_name}" <<EOF
 Description=IMAP archive NAS mount (message storage)
 After=network-online.target
 Requires=network-online.target
+${ON_FAILURE}
 
 [Mount]
 What=//${smb_host}/${smb_drive}
@@ -87,6 +121,7 @@ Description=IMAP archive (Dovecot) in docker compose
 After=${mount_unit_name} docker.service network-online.target
 Requires=${mount_unit_name} docker.service
 RequiresMountsFor=${mount_dir_path}
+${ON_FAILURE}
 
 [Service]
 Type=simple
@@ -119,6 +154,7 @@ cat >"${GEN_DIR}/${roundcube_unit_name}" <<EOF
 Description=IMAP archive web UI (Roundcube) in docker compose
 After=${imap_unit_name} docker.service network-online.target
 Requires=${imap_unit_name} docker.service
+${ON_FAILURE}
 
 [Service]
 Type=simple
@@ -155,6 +191,7 @@ Description=Pull new mail from Gmail into the archive
 After=${mount_unit_name} docker.service network-online.target
 Requires=${mount_unit_name} docker.service
 RequiresMountsFor=${mount_dir_path}
+${ON_FAILURE}
 
 [Service]
 Type=oneshot
@@ -197,6 +234,7 @@ cat >"${GEN_DIR}/${cert_service_unit_name}" <<EOF
 Description=Renew the IMAP archive TLS certificate (ACME DNS-01 via Linode)
 After=network-online.target docker.service
 Requires=network-online.target docker.service
+${ON_FAILURE}
 
 [Service]
 Type=oneshot
@@ -225,6 +263,97 @@ WantedBy=timers.target
 EOF
 
 ########################################
+# Offsite backup
+########################################
+backup_service_unit_name="imap-archive-backup.service"
+backup_timer_unit_name="imap-archive-backup.timer"
+echo "Creating backup service... ${backup_service_unit_name}"
+
+# After the sync rather than before: back up what was just pulled, so a
+# snapshot is never a full day behind the archive.
+cat >"${GEN_DIR}/${backup_service_unit_name}" <<EOF
+[Unit]
+Description=Back up the IMAP archive to offsite object storage
+After=${mount_unit_name} docker.service network-online.target ${sync_service_unit_name}
+Requires=${mount_unit_name} docker.service
+RequiresMountsFor=${mount_dir_path}
+${ON_FAILURE}
+
+[Service]
+Type=oneshot
+# The first backup uploads the entire archive and can run for many hours.
+TimeoutStartSec=infinity
+User=root
+Group=docker
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/scripts/backup.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Creating backup timer... ${backup_timer_unit_name}"
+# An hour after the sync timer's window, so the two do not contend for the
+# NAS mount or the network.
+cat >"${GEN_DIR}/${backup_timer_unit_name}" <<EOF
+[Unit]
+Description=Back up the IMAP archive daily
+Requires=${backup_service_unit_name}
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+########################################
+# Backup verification
+########################################
+check_service_unit_name="imap-archive-check.service"
+check_timer_unit_name="imap-archive-check.timer"
+echo "Creating backup check service... ${check_service_unit_name}"
+
+# Separate from the backup because it is slow and costs egress. `restic check`
+# alone only validates metadata; this re-reads a sample of the actual data.
+# A backup that has never been read back is not a backup.
+cat >"${GEN_DIR}/${check_service_unit_name}" <<EOF
+[Unit]
+Description=Verify the IMAP archive backup by re-reading repository data
+After=docker.service network-online.target
+Requires=docker.service
+${ON_FAILURE}
+
+[Service]
+Type=oneshot
+TimeoutStartSec=infinity
+User=root
+Group=docker
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/scripts/check-backup.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Creating backup check timer... ${check_timer_unit_name}"
+cat >"${GEN_DIR}/${check_timer_unit_name}" <<EOF
+[Unit]
+Description=Verify the IMAP archive backup weekly
+Requires=${check_service_unit_name}
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+########################################
 # Install
 ########################################
 if [[ "${INSTALL:-false}" != "true" ]]; then
@@ -233,8 +362,11 @@ if [[ "${INSTALL:-false}" != "true" ]]; then
   exit 0
 fi
 
-for unit in "${mount_unit_name}" "${imap_unit_name}" "${roundcube_unit_name}" \
+for unit in "${alert_unit_name}" \
+            "${mount_unit_name}" "${imap_unit_name}" "${roundcube_unit_name}" \
             "${sync_service_unit_name}" "${sync_timer_unit_name}" \
+            "${backup_service_unit_name}" "${backup_timer_unit_name}" \
+            "${check_service_unit_name}" "${check_timer_unit_name}" \
             "${cert_service_unit_name}" "${cert_timer_unit_name}"; do
   echo "Installing /etc/systemd/system/${unit}"
   sudo cp "${GEN_DIR}/${unit}" "/etc/systemd/system/${unit}"
@@ -257,7 +389,10 @@ sudo systemctl enable --now "${cert_timer_unit_name}"
 # The sync timer is deliberately NOT enabled here. Run the first sync by hand
 # so the initial pull can be watched - see docs/initial-setup.md.
 echo
-echo "NOT enabled: ${sync_timer_unit_name}"
+echo "NOT enabled: ${sync_timer_unit_name}, ${backup_timer_unit_name}, ${check_timer_unit_name}"
 echo "  Run the first Gmail sync manually, then enable it:"
 echo "    sudo systemctl enable --now ${sync_timer_unit_name}"
+echo "  Run the first backup manually (it uploads everything), then:"
+echo "    sudo systemctl enable --now ${backup_timer_unit_name}"
+echo "    sudo systemctl enable --now ${check_timer_unit_name}"
 echo "Done."

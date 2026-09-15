@@ -1,8 +1,7 @@
 # Backup and restore
 
-> **Status: the automated offsite backup (phase 4) is not built yet.**
-> The manual procedures below work today. Nothing should be deleted from Gmail
-> until the automation exists and a restore has been tested.
+> Nothing should be deleted from Gmail until you have run a verification and
+> tested a restore. Both are scripted below.
 
 ## Why this matters more than it does for the other stacks
 
@@ -34,29 +33,49 @@ only copy is on the machine the backup exists to protect, there is no backup.
 Store it somewhere unrelated: a password manager, or on paper. Not in this
 repo, not on the NAS, not in the archive.
 
-## Manual backup (works today)
-
-Mail, straight to the object store with restic:
+## Backing up
 
 ```bash
-set -a; source .env.bash; set +a
-
-restic snapshots || restic init          # first run only
-restic backup "${vmail_dir}" "${control_dir}" \
-  --tag imap-archive \
-  --exclude '*/tmp/*'
+./scripts/backup.sh                        # also on a daily timer
+sudo systemctl start imap-archive-backup   # same, via systemd
 ```
 
-Do **not** add `.mbsyncstate` to the exclude list. It lives inside the archive
-folder under `vmail/`, and restoring mail without it makes the next sync re-pull
-every message as a duplicate.
+It initialises the repository on first run, snapshots the mail and control
+directories, applies the retention policy with `--prune`, and finishes with a
+structural check.
 
-`tmp/` is excluded because Maildir uses it as a staging area for partially
-written messages; those files are not yet real mail.
+It **refuses to run if the NAS is not mounted.** Backing up an unmounted share
+would record an empty snapshot, and after enough days retention would age out
+the last good one — turning a mount failure into real data loss.
+
+What is in a snapshot, verified against a real repository:
+
+```
+/control/archive/dovecot-uidlist
+/vmail/archive/mail/Archive/.mbsyncstate
+/vmail/archive/mail/Archive/cur/...
+```
+
+`.mbsyncstate` is included deliberately — restoring mail without it makes the
+next sync re-pull everything as duplicates. `*/tmp/*` is excluded: Maildir uses
+it to stage partially written messages, which are not yet real mail.
 
 Because Maildir writes each message once and never modifies it, restic's
 deduplication means only genuinely new messages are uploaded after the first
 run — the initial upload is the slow one.
+
+### Object storage
+
+`RESTIC_REPOSITORY` is built from `S3_ENDPOINT` and `S3_BUCKET`, so any
+S3-compatible provider works by changing those two values:
+
+```bash
+export S3_ENDPOINT="https://ca-central-1.linodeobjects.com"   # Linode
+export S3_ENDPOINT="https://s3.us-west-004.backblazeb2.com"   # Backblaze B2
+```
+
+The bucket must already exist; restic creates the repository inside it, not the
+bucket itself.
 
 Secrets, separately and by hand:
 
@@ -67,68 +86,79 @@ gpg -c --output ~/imap-archive-env-$(date +%F).gpg .env.bash
 
 ## Verifying a backup
 
-An unverified backup is a guess. Do this after the first run, then periodically.
+An unverified backup is a guess.
 
 ```bash
-set -a; source .env.bash; set +a
-
-restic snapshots                 # is there a recent one?
-restic check                     # repository structure intact
-restic check --read-data-subset=5%   # actually re-read and verify 5% of data
+./scripts/check-backup.sh                       # also on a weekly timer
+RESTIC_CHECK_SUBSET=25% ./scripts/check-backup.sh
 ```
 
-`restic check` alone only validates metadata. The `--read-data-subset` form is
-the one that proves the bytes are really there and really readable.
+`restic check` on its own only validates metadata and structure — it will
+happily pass on a repository whose data blobs are unreadable. The script runs
+that first, then `--read-data-subset`, which actually downloads that share of
+the repository and verifies checksums. That second part is the one that proves
+the bytes come back. It costs egress, hence the modest 5% default and the
+separate weekly timer.
 
 ## Test restore (do this before deleting anything from Gmail)
 
-Restoring to a scratch directory proves the whole chain without touching live
-data.
+The default mode of `restore.sh` is a test restore into a scratch directory,
+because that is the operation you should run regularly:
 
 ```bash
-set -a; source .env.bash; set +a
-mkdir -p /tmp/restore-test
-
-restic restore latest --target /tmp/restore-test
-
-# Same number of messages as the live archive?
-find "${vmail_dir}" -type f -path '*/cur/*' | wc -l
-find /tmp/restore-test -type f -path '*/cur/*' | wc -l
-
-# Is a restored message a real, readable email?
-find /tmp/restore-test -type f -path '*/cur/*' | head -1 | xargs head -20
-
-rm -rf /tmp/restore-test
+./scripts/restore.sh
+./scripts/restore.sh --snapshot 1a03f918     # a specific snapshot
+./scripts/restore.sh --target /mnt/scratch   # somewhere specific
 ```
 
-The second check matters as much as the first: matching file counts prove the
-files exist, not that they contain mail.
+It restores, then reports:
+
+```
+  live archive : 5 messages
+  restored     : 5 messages
+  counts MATCH
+
+  Sample restored message:
+    From: s3@x.com
+    Subject: Backup probe 3
+
+  .mbsyncstate present: FarUidValidity 1 NearUidValidity 1 MaxPulledUid 5
+```
+
+All three lines matter. Counts prove the files exist; reading a sample message
+proves they contain mail rather than zeroes; and the `.mbsyncstate` line proves
+the snapshot can actually be restored from without causing a duplicate re-pull.
+
+Overwriting live data is a separate, deliberate mode — see below.
 
 ## Full recovery
 
 Rebuilding from nothing.
 
-1. Work through [initial-setup.md](initial-setup.md) steps 1–8 on the new
+1. Work through [initial-setup.md](initial-setup.md) steps 1–9 on the new
    server: user, Samba credentials, DNS, `.env.bash` (from your offsite copy),
    `gen-secrets.sh`, directories, systemd units, certificate.
 
-2. Restore the mail **before** starting Dovecot:
+2. Stop the services and restore in place, **before** starting Dovecot:
+
+   ```bash
+   sudo systemctl stop imap-archive imap-archive-sync.timer
+   mountpoint nas_data_mnt          # must be mounted first
+   ./scripts/restore.sh --in-place
+   ```
+
+   This requires typing `RESTORE` to confirm, and refuses to run while Dovecot
+   is up. Snapshots store absolute paths, so it puts `vmail` and `control` back
+   exactly where they came from — which means the paths in `.env.bash` must
+   match the old server's. If they do not, do a scratch restore and move the
+   contents into place instead.
+
+3. Fix ownership. restic preserves numeric IDs, and everything must be owned by
+   the uid the containers run as:
 
    ```bash
    set -a; source .env.bash; set +a
-   mountpoint nas_data_mnt          # must be mounted first
-   restic restore latest --target /
-   ```
-
-   `--target /` is correct here: snapshots store absolute paths, so this puts
-   `vmail` and `control` back exactly where they were. Confirm the paths in
-   `.env.bash` match the old server's, or restore to a scratch directory and
-   move the contents into place instead.
-
-3. Fix ownership — restic preserves numeric IDs, which may not match:
-
-   ```bash
-   sudo chown -R imapapp:imapapp "${control_dir}"
+   sudo chown -R 1000:1000 "${vmail_dir}" "${control_dir}"
    ```
 
 4. Start Dovecot and rebuild the indexes, which were deliberately not backed up:
@@ -138,10 +168,19 @@ Rebuilding from nothing.
    docker exec imap_archive_dovecot doveadm index -u "${ARCHIVE_USER}" '*'
    ```
 
-   This takes a while on a large archive, and full-text search results stay
-   incomplete until it finishes.
+   This takes a while on a large archive, and full-text search stays incomplete
+   until it finishes.
 
-5. Run the read-only verification from
+5. Confirm `.mbsyncstate` came back **before** re-enabling the sync timer:
+
+   ```bash
+   ls -la "${vmail_dir}/${ARCHIVE_USER}/mail/${ARCHIVE_FOLDER}/.mbsyncstate"
+   sudo systemctl enable --now imap-archive-sync.timer
+   ```
+
+   `sync-gmail.sh` will refuse to run if it is missing, but check anyway.
+
+6. Run the read-only verification from
    [maintenance.md](maintenance.md#verifying-the-archive-is-still-read-only).
 
 ### If only the local disk was lost
@@ -151,12 +190,22 @@ The mail is on the NAS and is fine. Recreate the directories, restore
 If `control/` cannot be restored, the archive still works — every message gets
 a new IMAP UID, so clients re-download it once.
 
-## Still to build (phase 4)
+## Alerting
 
-- `backup.sh` wrapping the restic call, plus `imap-archive-backup.{service,timer}`.
-- Retention via `restic forget --prune`, using the `RESTIC_KEEP_*` values
-  already present in `.env.bash`.
-- A scheduled `restic check --read-data-subset`, since an unverified automated
-  backup is the failure mode this whole document exists to avoid.
-- Alerting on failure — a backup timer that has been silently failing for six
-  months is worse than no backup, because it is trusted.
+`imap-archive-backup.service` and `imap-archive-check.service` both carry
+`OnFailure=imap-archive-alert@%n.service`, so a failed backup posts to Discord
+with the last 25 journal lines.
+
+More importantly for backups, `check-backup.sh` posts a **weekly heartbeat** on
+success (`DISCORD_HEARTBEAT="true"`), including the latest snapshot and
+repository stats. A backup system that only speaks up on failure cannot be
+distinguished from one whose timer stopped running months ago — the heartbeat is
+what makes silence meaningful.
+
+If the heartbeat stops arriving, check:
+
+```bash
+systemctl list-timers 'imap-archive*'
+sudo journalctl -u imap-archive-check -n 50
+./scripts/notify-discord.sh --test
+```
