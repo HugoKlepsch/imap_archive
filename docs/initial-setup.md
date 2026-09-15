@@ -1,6 +1,6 @@
 # Initial setup
 
-Setting the archive up on a fresh server. All four phases.
+Setting the archive up on a fresh server, end to end.
 
 Commands run on the server, from the repo root, unless stated otherwise.
 
@@ -377,8 +377,19 @@ does nothing and exits cleanly.
 
 Thunderbird will show the folders as read-only. That is correct.
 
-## What is not set up yet
+## Before you delete anything from Gmail
 
-Phase 4 (verification and offsite backup) is not built.
-**Nothing should be deleted from Gmail until phase 4 is complete and a restore
-has actually been tested.**
+Step 13 is not optional and not a formality. All three must have been run
+against the real archive, on this server, and passed:
+
+| Check                       | Proves                                            |
+|-----------------------------|---------------------------------------------------|
+| `scripts/backup.sh`         | A snapshot exists in object storage.              |
+| `scripts/restore.sh`        | That snapshot actually restores, end to end.      |
+| `scripts/verify-archive.sh` | Every message in Gmail is present in the archive. |
+
+Confirm the timers are enabled (`systemctl list-timers 'imap-archive-*'`) and
+that `RESTIC_PASSWORD` is stored somewhere that is neither this server nor the
+archive — without it the backups are permanently unreadable.
+
+**Only then delete from Gmail.**

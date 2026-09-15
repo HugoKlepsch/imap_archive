@@ -148,7 +148,7 @@ Two modifications, both expected and neither data loss:
 
 A byte-for-byte comparison against Gmail will therefore always differ. Verified
 that, ignoring those two, archived messages are identical to the source
-including attachments — which is what phase 4's verification must check.
+including attachments — which is what `scripts/verify-archive.sh` checks.
 
 ## Verifying the archive is still read-only
 

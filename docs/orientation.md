@@ -25,7 +25,6 @@ are making.
 ## How the pieces fit
 
 ```
-                         (phase 3)
   Gmail  ──── mbsync ────────────────►  Maildir on the NAS
   (IMAP, app password)                        │
                                               │  read-only
@@ -36,7 +35,7 @@ are making.
                                               │        (web UI)      Caddy, TLS
                                               │                   https://mail...
                                               └──── restic ──► object storage
-                                                    (phase 4)
+                                                               (encrypted, S3)
 ```
 
 Mail arrives by **filesystem writes, not IMAP**. mbsync drops Maildir files
@@ -101,16 +100,14 @@ appear to work and then quietly corrupt mailboxes.
 
 ## Build status
 
-| Phase | What                                     | Status    |
-|-------|------------------------------------------|-----------|
-| 1     | Dovecot, TLS, read-only archive, systemd | **Built** |
-| 2     | Roundcube web UI                         | Not built |
-| 3     | mbsync pulling Gmail                     | Not built |
-| 4     | Verification, restic offsite backup      | Not built |
+Everything described above is written: Dovecot with TLS and the read-only ACL,
+the systemd units, the Roundcube web UI, the mbsync pull from Gmail, and
+verification plus restic offsite backup. It has **not been deployed to the
+server yet**.
 
-All four phases are built. Nothing should be deleted from Gmail until
-`scripts/backup.sh`, `scripts/restore.sh` and `scripts/verify-archive.sh` have
-all been run and passed — see [initial-setup.md](initial-setup.md) step 13.
+Nothing should be deleted from Gmail until `scripts/backup.sh`,
+`scripts/restore.sh` and `scripts/verify-archive.sh` have all been run against
+the real archive and passed — see [initial-setup.md](initial-setup.md) step 13.
 
 ## When something breaks
 
