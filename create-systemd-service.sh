@@ -9,6 +9,8 @@
 #   <mount>.mount                  CIFS mount for the NAS share (the mail)
 #   imap-archive.service           Dovecot via docker compose
 #   imap-archive-roundcube.service Roundcube web UI via docker compose
+#   imap-archive-sync.service      mbsync pull from Gmail
+#   imap-archive-sync.timer        runs the above daily (not auto-enabled)
 #   imap-archive-cert.service      lego certificate issuance/renewal
 #   imap-archive-cert.timer        runs the above daily
 #
@@ -62,7 +64,7 @@ Requires=network-online.target
 What=//${smb_host}/${smb_drive}
 Where=${mount_dir_path}
 Type=cifs
-Options=credentials=${smb_creds_file},uid=${nas_mount_user},gid=${nas_mount_group},file_mode=0664,dir_mode=0775,iocharset=utf8,nofail,_netdev
+Options=credentials=${smb_creds_file},uid=${nas_mount_uid},gid=${nas_mount_gid},file_mode=0660,dir_mode=0770,iocharset=utf8,nofail,_netdev
 TimeoutSec=30
 
 [Install]
@@ -134,6 +136,56 @@ WantedBy=multi-user.target
 EOF
 
 ########################################
+# Gmail sync
+########################################
+sync_service_unit_name="imap-archive-sync.service"
+sync_timer_unit_name="imap-archive-sync.timer"
+echo "Creating Gmail sync service... ${sync_service_unit_name}"
+
+# TimeoutStartSec=infinity because the FIRST sync of a large Gmail account can
+# run for many hours - Google throttles IMAP downloads, so a 15GB mailbox is a
+# multi-day job. systemd's default timeout would kill it partway. Subsequent
+# incremental runs take seconds.
+#
+# mbsync journals its progress, so an interrupted run resumes rather than
+# restarting, and re-running is always safe.
+cat >"${GEN_DIR}/${sync_service_unit_name}" <<EOF
+[Unit]
+Description=Pull new mail from Gmail into the archive
+After=${mount_unit_name} docker.service network-online.target
+Requires=${mount_unit_name} docker.service
+RequiresMountsFor=${mount_dir_path}
+
+[Service]
+Type=oneshot
+TimeoutStartSec=infinity
+User=root
+Group=docker
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/scripts/sync-gmail.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Creating Gmail sync timer... ${sync_timer_unit_name}"
+# Daily rather than hourly: Gmail throttles IMAP, nothing here is time
+# critical, and a slower cadence keeps well clear of the daily download cap.
+cat >"${GEN_DIR}/${sync_timer_unit_name}" <<EOF
+[Unit]
+Description=Pull new mail from Gmail daily
+Requires=${sync_service_unit_name}
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+########################################
 # Certificate renewal
 ########################################
 cert_service_unit_name="imap-archive-cert.service"
@@ -182,6 +234,7 @@ if [[ "${INSTALL:-false}" != "true" ]]; then
 fi
 
 for unit in "${mount_unit_name}" "${imap_unit_name}" "${roundcube_unit_name}" \
+            "${sync_service_unit_name}" "${sync_timer_unit_name}" \
             "${cert_service_unit_name}" "${cert_timer_unit_name}"; do
   echo "Installing /etc/systemd/system/${unit}"
   sudo cp "${GEN_DIR}/${unit}" "/etc/systemd/system/${unit}"
@@ -201,4 +254,10 @@ sudo systemctl enable --now "${imap_unit_name}"
 sudo systemctl enable --now "${roundcube_unit_name}"
 # Only the timer is enabled; it pulls in the service it runs.
 sudo systemctl enable --now "${cert_timer_unit_name}"
+# The sync timer is deliberately NOT enabled here. Run the first sync by hand
+# so the initial pull can be watched - see docs/initial-setup.md.
+echo
+echo "NOT enabled: ${sync_timer_unit_name}"
+echo "  Run the first Gmail sync manually, then enable it:"
+echo "    sudo systemctl enable --now ${sync_timer_unit_name}"
 echo "Done."

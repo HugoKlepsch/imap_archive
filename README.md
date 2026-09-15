@@ -67,6 +67,8 @@ finished and a restore has been tested.**
 ```bash
 sudo systemctl status imap-archive
 sudo journalctl -u imap-archive -f
-./scripts/gen-secrets.sh                 # after changing the password
+./scripts/gen-secrets.sh                 # after changing any credential
 sudo ./scripts/renew-cert.sh             # certificate (also on a daily timer)
+sudo ./scripts/sync-gmail.sh             # pull from Gmail (also on a daily timer)
+LIST=true sudo ./scripts/sync-gmail.sh   # list Gmail folders, read-only
 ```

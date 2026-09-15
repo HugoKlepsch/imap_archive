@@ -86,6 +86,70 @@ invalidates every existing session. That is harmless — log in again.
 `ROUNDCUBE_TRUSTED_PROXIES` does not list the address Caddy's traffic actually
 arrives from. Check it against `ip -4 addr show docker0`.
 
+## Gmail sync
+
+```bash
+sudo ./scripts/sync-gmail.sh                  # run now
+systemctl list-timers 'imap-archive-sync*'
+sudo journalctl -u imap-archive-sync -n 100
+LIST=true sudo ./scripts/sync-gmail.sh        # list Gmail folders (read-only)
+```
+
+The script prints a before/after message count, so a normal incremental run
+reads `1234 -> 1237 messages (+3)`.
+
+**Never use `mbsync --dry-run` against this archive.** It writes the messages
+it claims it "would pull" without recording them in `.mbsyncstate`, so the next
+real sync pulls them again. Verified: 3 messages became 6. `sync-gmail.sh`
+refuses `DRY_RUN=true` for this reason. To preview, use `LIST=true` or sync a
+small Gmail label.
+
+### If message counts jump unexpectedly
+
+Almost always a lost or corrupted `.mbsyncstate`, which lives inside the
+destination folder on the NAS:
+
+```bash
+set -a; source .env.bash; set +a
+ls -la "${vmail_dir}/${ARCHIVE_USER}/mail/${ARCHIVE_FOLDER}/.mbsyncstate"
+```
+
+Without it mbsync has no memory of what it already pulled and re-pulls the
+whole folder, adding a second copy of every message. If it is gone, **do not
+just re-run the sync** — restore it from backup first. If it cannot be
+restored, the archive needs de-duplicating by `Message-ID` before syncing again.
+
+### Deduplicating
+
+```bash
+set -a; source .env.bash; set +a
+cd "${vmail_dir}/${ARCHIVE_USER}/mail/${ARCHIVE_FOLDER}/cur"
+grep -h '^Message-ID:' * | sort | uniq -d | head    # are there duplicates?
+```
+
+`doveadm deduplicate -u "${ARCHIVE_USER}" ${ARCHIVE_FOLDER}` can remove them,
+but it deletes mail — take a backup first and re-read
+[backup-restore.md](backup-restore.md).
+
+### Authentication failures
+
+Gmail App Passwords are revoked whenever the account password changes, and
+Google expires unused ones. Create a new one at
+<https://myaccount.google.com/apppasswords>, update `GMAIL_APP_PASSWORD`, then
+`./scripts/gen-secrets.sh`.
+
+### What mbsync changes about a message
+
+Two modifications, both expected and neither data loss:
+
+- **CRLF → LF.** IMAP transmits CRLF; on-disk Maildir uses LF. Dovecot converts
+  back when serving the message, so clients see the original.
+- **An added `X-TUID:` header**, which isync uses to track messages.
+
+A byte-for-byte comparison against Gmail will therefore always differ. Verified
+that, ignoring those two, archived messages are identical to the source
+including attachments — which is what phase 4's verification must check.
+
 ## Verifying the archive is still read-only
 
 Worth re-running after any config change. Both commands must be refused.
@@ -217,6 +281,21 @@ Confirm these four are still in effect before restarting:
 `index`, folders become invisible to mbsync and to every non-Dovecot tool.
 
 Then `sudo systemctl restart imap-archive` and re-run the read-only check.
+
+## Upgrading mbsync
+
+`ALPINE_VERSION` in `.env.bash` pins the base image, and isync comes from that
+Alpine release. After bumping it, rebuild and re-verify idempotency — run the
+sync twice and confirm the second run pulls **0** messages:
+
+```bash
+docker compose -f compose/mbsync/docker-compose-mbsync.yml build --no-cache
+sudo ./scripts/sync-gmail.sh     # note the count
+sudo ./scripts/sync-gmail.sh     # must be +0
+```
+
+That second run is the test that matters. A version that silently stops
+honouring `SyncState` would re-pull the entire archive on every timer firing.
 
 ## Upgrading lego
 

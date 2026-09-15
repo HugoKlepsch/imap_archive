@@ -1,7 +1,7 @@
 # Initial setup
 
-Setting the archive up on a fresh server. Phases 1–2 — the Gmail sync and the
-offsite backup are not built yet.
+Setting the archive up on a fresh server. Phases 1–3 — the offsite backup
+(phase 4) is not built yet.
 
 Commands run on the server, from the repo root, unless stated otherwise.
 
@@ -206,7 +206,73 @@ web UI with its wildcard, while Dovecot serves IMAPS with the single-name
 certificate lego issued. They are requested independently and their ACME
 challenge records never collide.
 
-## 12. Thunderbird
+## 12. First Gmail sync
+
+Create an **App Password** at <https://myaccount.google.com/apppasswords> — it
+requires 2FA on the account, and it is not your Google password. Put it in
+`GMAIL_APP_PASSWORD`, then regenerate the config:
+
+```bash
+./scripts/gen-secrets.sh
+```
+
+Check the connection and confirm the folder name, which is locale-dependent —
+`[Gmail]/All Mail` on an English account:
+
+```bash
+LIST=true sudo ./scripts/sync-gmail.sh
+```
+
+### Sync a small label first
+
+Do not point the first run at All Mail. Apply a Gmail label to a handful of
+messages, set `GMAIL_SOURCE_FOLDER` to it, and sync that:
+
+```bash
+vim .env.bash            # GMAIL_SOURCE_FOLDER="test-archive"
+./scripts/gen-secrets.sh
+sudo ./scripts/sync-gmail.sh
+```
+
+Then confirm those messages appear in Thunderbird or Roundcube, with
+attachments intact, before committing to the full pull.
+
+> **There is no dry-run option, deliberately.** mbsync's `--dry-run` reports
+> "would pull N messages" while actually writing them to the archive and *not*
+> recording them in `.mbsyncstate` — the next real sync then pulls them again.
+> Verified: a dry run followed by a real run turned 3 messages into 6. The
+> script refuses `DRY_RUN=true` for this reason. Use `LIST=true`, or a small
+> label as above.
+
+### The full pull
+
+Point `GMAIL_SOURCE_FOLDER` back at `[Gmail]/All Mail`, regenerate, and run it
+inside `tmux` or `screen`:
+
+```bash
+vim .env.bash
+./scripts/gen-secrets.sh
+tmux new -s gmailsync
+sudo ./scripts/sync-gmail.sh
+```
+
+Expect this to take **hours to days**. Google throttles IMAP downloads at
+roughly 2.5 GB/day, so a large mailbox is a multi-day job. This is normal.
+
+It is safe to interrupt and safe to re-run: mbsync journals its progress and
+resumes rather than starting over. The systemd unit sets
+`TimeoutStartSec=infinity` for the same reason.
+
+### Enable the timer
+
+Only after a successful full sync:
+
+```bash
+sudo systemctl enable --now imap-archive-sync.timer
+systemctl list-timers 'imap-archive*'
+```
+
+## 13. Thunderbird
 
 | Setting             | Value                    |
 |---------------------|--------------------------|
@@ -221,6 +287,6 @@ Thunderbird will show the folders as read-only. That is correct.
 
 ## What is not set up yet
 
-Phases 3–4 (Gmail sync, verification, offsite backup) are not built.
+Phase 4 (verification and offsite backup) is not built.
 **Nothing should be deleted from Gmail until phase 4 is complete and a restore
 has actually been tested.**

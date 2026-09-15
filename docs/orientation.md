@@ -67,6 +67,14 @@ appear to work and then quietly corrupt mailboxes.
 - **All Mail, flat.** Gmail shows one message under every label *and* in All
   Mail. Syncing labels as folders would store popular messages several times;
   syncing All Mail alone stores each exactly once. Search replaces browsing.
+- **`Sync PullNew` and nothing else.** mbsync copies new messages from Gmail
+  and never propagates deletions or flag changes. Plain `Pull` would mirror
+  deletions, so emptying Gmail would empty the archive — the exact disaster
+  this system exists to prevent. The cost is that read/unread state is not
+  mirrored, which does not matter for an archive.
+- **mbsync writes files, Dovecot serves them.** The two never talk to each
+  other. Because delivery happens on the filesystem rather than over IMAP, the
+  read-only ACL applies to people and not to the sync.
 - **ACL-enforced read-only.** Clients get lookup, read, and `\Seen`. No delete,
   no expunge, no folder creation. A stray drag in Thunderbird cannot destroy
   the only copy. Verify with `docs/maintenance.md`.

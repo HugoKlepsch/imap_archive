@@ -1,0 +1,32 @@
+# mbsync: pulls Gmail into the archive's Maildir.
+#
+# This is a ONESHOT job, not a long-running service - it is started by
+# imap-archive-sync.timer via scripts/sync-gmail.sh, which uses
+# `docker compose run --rm`. There is no `up` for this file.
+#
+# Note it does NOT talk to Dovecot. mbsync writes Maildir files straight onto
+# the share and Dovecot notices them on its next scan. That is what lets the
+# archive be read-only over IMAP and still receive new mail.
+
+name: imap-archive-sync
+
+services:
+  mbsync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - ALPINE_VERSION=${ALPINE_VERSION:-3.21}
+    image: imap-archive/mbsync:${ALPINE_VERSION:-3.21}
+    # 1000:1000 = vmail, matching the CIFS mount and Dovecot.
+    user: "1000:1000"
+    volumes:
+      # Generated from .env.bash by scripts/gen-secrets.sh - contains the Gmail
+      # app password, so it is never committed.
+      - ../../generated_config/mbsync/mbsyncrc:/mbsyncrc:ro
+      # The archive itself. mbsync also keeps its sync state (.mbsyncstate,
+      # .uidvalidity) inside the destination folder here.
+      - ${vmail_dir}:/srv/vmail
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+    # No ports, no network aliases: this only makes outbound connections.
