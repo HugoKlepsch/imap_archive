@@ -121,3 +121,4 @@ empty to disable.
 - Setting it up the first time: [initial-setup.md](initial-setup.md)
 - Day-to-day operation: [maintenance.md](maintenance.md)
 - Backups and recovery: [backup-restore.md](backup-restore.md)
+- Adding more users, if that ever comes up: [multi-user.md](multi-user.md)
