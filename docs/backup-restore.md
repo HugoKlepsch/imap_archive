@@ -48,7 +48,7 @@ It **refuses to run if the NAS is not mounted.** Backing up an unmounted share
 would record an empty snapshot, and after enough days retention would age out
 the last good one — turning a mount failure into real data loss.
 
-What is in a snapshot, verified against a real repository:
+What is in a snapshot:
 
 ```
 /control/archive/dovecot-uidlist

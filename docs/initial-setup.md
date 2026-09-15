@@ -62,12 +62,12 @@ vim .env.bash
 
 Every value is commented in the template. The ones with no sensible default:
 
-| Variable           | Notes                                                        |
-|--------------------|--------------------------------------------------------------|
-| `MAIL_HOSTNAME`    | Must match the DNS record from step 3 and the certificate.   |
-| `LINODE_TOKEN`     | Its own token, so it can be revoked without affecting Caddy. |
-| `ARCHIVE_PASSWORD` | The IMAP login. `openssl rand -base64 24`                    |
-| `DOVEADM_PASSWORD` | Admin API. Defaults to `supersecret` upstream — set it.      |
+| Variable           | Notes                                                      |
+|--------------------|------------------------------------------------------------|
+| `MAIL_HOSTNAME`    | Must match the DNS record from step 3 and the certificate. |
+| `LINODE_TOKEN`     | Linode DNS API token.                                      |
+| `ARCHIVE_PASSWORD` | The IMAP login. `openssl rand -base64 24`                  |
+| `DOVEADM_PASSWORD` | Admin API. Defaults to `supersecret` upstream — set it.    |
 
 While testing, point `ACME_CA` at Let's Encrypt **staging**. Production has
 tight rate limits and a misconfigured DNS token can burn them quickly.

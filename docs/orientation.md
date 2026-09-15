@@ -18,9 +18,7 @@ way a message enters the archive is a sync job writing a file to disk.
 
 > Once messages are deleted from Gmail, this system is the **only** copy.
 
-Every design decision below follows from that sentence. If you are about to
-change something and it trades safety for convenience, that is the trade you
-are making.
+Every design decision below follows from that sentence.
 
 ## How the pieces fit
 
@@ -38,7 +36,7 @@ are making.
                                                                (encrypted, S3)
 ```
 
-Mail arrives by **filesystem writes, not IMAP**. mbsync drops Maildir files
+Mail arrives by **filesystem writes from mbsync**. mbsync drops Maildir files
 straight onto the share; Dovecot notices them on its next scan. This is why
 the archive can be read-only over IMAP and still grow.
 
@@ -96,7 +94,7 @@ appear to work and then quietly corrupt mailboxes.
 - **Ports are 31143/31993 inside the container.** The upstream image ships
   `vendor.d/rootless.conf` which moves them there, because Dovecot runs
   unprivileged as `vmail` and cannot bind below 1024. The compose file maps
-  them to the standard 143/993 on the host. This is correct, not a typo.
+  them to the standard 143/993 on the host.
 
 ## Build status
 
