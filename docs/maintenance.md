@@ -206,9 +206,10 @@ record is visible to a public resolver while the run is in progress:
 dig +short TXT _acme-challenge.mail.hugo-klepsch.tech @1.1.1.1
 ```
 
-Raise `LINODE_PROPAGATION_TIMEOUT` before anything else. Do not "fix" it by
-lowering `LINODE_TTL` below 30 — that is already the minimum Linode accepts,
-and a TTL of 0 means "zone default", which resolvers cache for hours.
+Raise `LINODE_PROPAGATION_TIMEOUT` before anything else; it is a cap, so a
+larger value costs nothing on a run that succeeds quickly. Do not "fix" it by
+lowering `LINODE_TTL` below 300 — lego refuses to start below that, and a TTL
+of 0 means "zone default", which resolvers cache for hours.
 
 ## Rebuilding indexes
 

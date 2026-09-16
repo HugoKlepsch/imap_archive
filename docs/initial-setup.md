@@ -121,11 +121,15 @@ exactly like catastrophic data loss.
 sudo ./scripts/renew-cert.sh
 ```
 
-Expect this to take two to three minutes: it writes a TXT record and waits for
-propagation. `LINODE_TTL=30` is deliberate — Linode treats a TTL of 0 as "zone
-default", which public resolvers then cache for many hours, causing the CA to
-keep seeing a stale record. The same problem is documented in the Caddyfile in
-`~/git/reverse-proxy`.
+Expect this to take a few minutes: it writes a TXT record and waits for
+propagation. Linode rebuilds its zone files on a 15-minute cycle, so a first
+issuance can take most of that; the run ends as soon as the record is visible.
+
+`LINODE_TTL=300` is both the lowest value lego's Linode provider accepts and
+its default — it rejects anything lower outright. Do not set it to 0: Linode
+reads that as "zone default", which public resolvers then cache for many
+hours, causing the CA to keep seeing a stale record. The same problem is
+documented in the Caddyfile in `~/git/reverse-proxy`.
 
 It should end with an expiry date. Then enable the renewal timer:
 

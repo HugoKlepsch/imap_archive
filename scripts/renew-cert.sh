@@ -42,8 +42,8 @@ BEFORE_SUM="$(sha256sum "${cert_dir}/tls.crt" 2>/dev/null | cut -d' ' -f1 || ech
 docker run --rm \
   -v "${LEGO_DIR}:/data" \
   -e "LINODE_TOKEN=${LINODE_TOKEN}" \
-  -e "LINODE_TTL=${LINODE_TTL:-30}" \
-  -e "LINODE_PROPAGATION_TIMEOUT=${LINODE_PROPAGATION_TIMEOUT:-180}" \
+  -e "LINODE_TTL=${LINODE_TTL:-300}" \
+  -e "LINODE_PROPAGATION_TIMEOUT=${LINODE_PROPAGATION_TIMEOUT:-1200}" \
   -e "LINODE_POLLING_INTERVAL=${LINODE_POLLING_INTERVAL:-15}" \
   "goacme/lego:v${LEGO_VERSION:?set LEGO_VERSION in .env.bash}" \
     run \
