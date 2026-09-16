@@ -54,7 +54,12 @@ ARCHIVE_PATH="${vmail_dir}/$(echo "$ARCHIVE_USER" | tr '[:upper:]' '[:lower:]')/
 count_messages() {
   # Maildir: one file per message across cur/ and new/. mbsync's own state
   # files live in the folder root, so they are not counted.
-  find "${ARCHIVE_PATH}/cur" "${ARCHIVE_PATH}/new" -type f 2>/dev/null | wc -l
+  #
+  # The folder does not exist until the first sync creates it. find then exits
+  # 1, and with `set -o pipefail` that status propagates through the pipe and
+  # kills the script - silently, because the message went to /dev/null. The
+  # `|| true` is what makes a fresh archive count as 0 rather than exit 1.
+  find "${ARCHIVE_PATH}/cur" "${ARCHIVE_PATH}/new" -type f 2>/dev/null | wc -l || true
 }
 
 # ---------------------------------------------------------------------------
@@ -114,7 +119,7 @@ What to do instead:
 If this really is a fresh archive whose messages arrived some other way, and
 you accept that they will be duplicated, override with:
 
-  ALLOW_MISSING_SYNC_STATE=true $0
+  sudo ALLOW_MISSING_SYNC_STATE=true $0
 MSG
     exit 1
   fi

@@ -33,7 +33,9 @@ if docker ps --format '{{.Names}}' | grep -qx imap_archive_dovecot; then
   served="$(docker exec imap_archive_dovecot \
       doveadm mailbox status -u "${ARCHIVE_USER}" messages "${ARCHIVE_FOLDER}" 2>/dev/null \
       | sed -n 's/.*messages=\([0-9]*\).*/\1/p')"
-  ondisk="$(find "${ARCHIVE_PATH}/cur" "${ARCHIVE_PATH}/new" -type f 2>/dev/null | wc -l)"
+  # `|| true`: before the first sync neither directory exists, and find's exit
+  # status would otherwise trip `set -o pipefail`. Same guard as sync-gmail.sh.
+  ondisk="$(find "${ARCHIVE_PATH}/cur" "${ARCHIVE_PATH}/new" -type f 2>/dev/null | wc -l || true)"
   echo "Dovecot serves: ${served:-unknown}   files on disk: ${ondisk}"
   if [[ -n "$served" && "$served" != "$ondisk" ]]; then
     echo "WARNING: Dovecot serves a different count than exists on disk." >&2

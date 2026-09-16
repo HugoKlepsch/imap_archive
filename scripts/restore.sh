@@ -97,8 +97,8 @@ restic_run_rw -v "${TARGET}:${TARGET}" \
 
 echo
 echo "=== Verification ==="
-live_count=$(find "${vmail_dir}" -type f -path '*/cur/*' 2>/dev/null | wc -l)
-rest_count=$(find "${TARGET}" -type f -path '*/cur/*' 2>/dev/null | wc -l)
+live_count=$(find "${vmail_dir}" -type f -path '*/cur/*' 2>/dev/null | wc -l || true)
+rest_count=$(find "${TARGET}" -type f -path '*/cur/*' 2>/dev/null | wc -l || true)
 echo "  live archive : ${live_count} messages"
 echo "  restored     : ${rest_count} messages"
 if [[ "$live_count" == "$rest_count" ]]; then

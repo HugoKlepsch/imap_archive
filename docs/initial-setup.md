@@ -234,7 +234,7 @@ Check the connection and confirm the folder name, which is locale-dependent —
 `[Gmail]/All Mail` on an English account:
 
 ```bash
-LIST=true sudo ./scripts/sync-gmail.sh
+sudo LIST=true ./scripts/sync-gmail.sh
 ```
 
 ### Sync a small label first
