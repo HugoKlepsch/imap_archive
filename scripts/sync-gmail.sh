@@ -1,8 +1,13 @@
 #!/bin/bash
 # Pull new mail from Gmail into the archive.
 #
-#   ./scripts/sync-gmail.sh           # normal incremental sync
-#   LIST=true ./scripts/sync-gmail.sh # list Gmail's folders and exit (read-only)
+#   ./scripts/sync-gmail.sh                # normal incremental sync
+#   LIST=true ./scripts/sync-gmail.sh      # show the configured folder pair
+#   LIST_ALL=true ./scripts/sync-gmail.sh  # list every folder Gmail offers
+#
+# Both listing modes are read-only and exit without syncing. Under sudo the
+# assignment goes AFTER it - `sudo LIST=true ...` - because sudo resets the
+# environment and would otherwise drop the variable.
 #
 # Refuses to run if the archive holds messages but .mbsyncstate is missing or
 # empty, which would cause mbsync to pull a duplicate copy of everything.
@@ -87,7 +92,16 @@ count_messages() {
 STATE_FILE="${ARCHIVE_PATH}/.mbsyncstate"
 EXISTING="$(count_messages)"
 
-if [[ "${LIST:-false}" != "true" && "${EXISTING}" -gt 0 ]]; then
+# Neither listing mode writes anything, so both skip the guard below and the
+# post-sync accounting at the end.
+LIST_MODE=""
+if [[ "${LIST_ALL:-false}" == "true" ]]; then
+  LIST_MODE="stores"
+elif [[ "${LIST:-false}" == "true" ]]; then
+  LIST_MODE="channel"
+fi
+
+if [[ -z "${LIST_MODE}" && "${EXISTING}" -gt 0 ]]; then
   STATE_PROBLEM=""
   if [[ ! -f "${STATE_FILE}" ]]; then
     STATE_PROBLEM="missing"
@@ -142,12 +156,26 @@ if [[ "${DRY_RUN:-false}" == "true" ]]; then
 fi
 
 MBSYNC_ARGS=(-c /mbsyncrc)
-if [[ "${LIST:-false}" == "true" ]]; then
-  echo "Listing folders on the Gmail side..."
-  MBSYNC_ARGS+=(--list gmail-archive)
-else
-  MBSYNC_ARGS+=(--verbose gmail-archive)
-fi
+case "${LIST_MODE}" in
+  stores)
+    # --list-stores enumerates the STORE, so no channel is involved and there
+    # is nothing that could sync. This is the one that answers "what is my
+    # All Mail folder actually called", which is locale-dependent - and the
+    # reason `--list` cannot: the channel names one explicit folder, so it
+    # echoes back whatever GMAIL_SOURCE_FOLDER says, spelled right or not.
+    echo "Listing every folder on the Gmail side..."
+    MBSYNC_ARGS+=(--list-stores gmail-remote)
+    ;;
+  channel)
+    # Resolves the configured channel: one line, Gmail folder <=> archive
+    # folder. Proves the credentials and TLS work, not that the folder exists.
+    echo "Listing the configured folder pair..."
+    MBSYNC_ARGS+=(--list gmail-archive)
+    ;;
+  *)
+    MBSYNC_ARGS+=(--verbose gmail-archive)
+    ;;
+esac
 
 BEFORE="${EXISTING}"
 echo "Archive currently holds ${BEFORE} messages in '${ARCHIVE_FOLDER}'."
@@ -156,7 +184,7 @@ START="$(date +%s)"
 docker compose -f "$COMPOSE_FILE" run --rm mbsync "${MBSYNC_ARGS[@]}"
 ELAPSED=$(( $(date +%s) - START ))
 
-if [[ "${LIST:-false}" == "true" ]]; then
+if [[ -n "${LIST_MODE}" ]]; then
   exit 0
 fi
 

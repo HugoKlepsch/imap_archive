@@ -230,12 +230,26 @@ requires 2FA on the account, and it is not your Google password. Put it in
 ./scripts/gen-secrets.sh
 ```
 
-Check the connection and confirm the folder name, which is locale-dependent —
-`[Gmail]/All Mail` on an English account:
+Confirm the folder name, which is locale-dependent — `[Gmail]/All Mail` on an
+English account, translated on others:
 
 ```bash
-sudo LIST=true ./scripts/sync-gmail.sh
+sudo LIST_ALL=true ./scripts/sync-gmail.sh
 ```
+
+That lists every folder Gmail offers, which is how you find the exact spelling
+to put in `GMAIL_SOURCE_FOLDER`. Labels appear as folders, nested ones as
+`parent/child`.
+
+Note the `sudo LIST_ALL=true` ordering. `sudo` resets the environment, so an
+assignment written in front of it is dropped before the script ever sees it —
+the script would run a real sync instead.
+
+There is also `sudo LIST=true ./scripts/sync-gmail.sh`, which prints the one
+configured pair (`[Gmail]/All Mail <=> Archive`). It proves the app password
+and TLS work, but it cannot confirm the folder name: the channel names one
+explicit folder, so it echoes `GMAIL_SOURCE_FOLDER` back whether or not that
+folder exists. Use `LIST_ALL` for the name, `LIST` for the credentials.
 
 ### Sync a small label first
 

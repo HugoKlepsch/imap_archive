@@ -92,7 +92,8 @@ arrives from. Check it against `ip -4 addr show docker0`.
 sudo ./scripts/sync-gmail.sh                  # run now
 systemctl list-timers 'imap-archive-sync*'
 sudo journalctl -u imap-archive-sync -n 100
-sudo LIST=true ./scripts/sync-gmail.sh        # list Gmail folders (read-only)
+sudo LIST_ALL=true ./scripts/sync-gmail.sh    # list every Gmail folder (read-only)
+sudo LIST=true ./scripts/sync-gmail.sh        # show the configured pair (read-only)
 ```
 
 The script prints a before/after message count, so a normal incremental run
