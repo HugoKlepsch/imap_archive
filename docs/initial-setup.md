@@ -11,18 +11,24 @@ Commands run on the server, from the repo root, unless stated otherwise.
 - A Linode DNS API token with read/write on the zone.
 - `cifs-utils` installed (`sudo pacman -S cifs-utils` / `apt install cifs-utils`).
 
-## 1. User and group
+## 1. Ownership
 
-Everything that touches archive data runs as `imapapp`, and your admin user
-needs to be able to read it.
+The containers run as `vmail`, which is uid/gid **1000:1000** inside both the
+Dovecot image and the mbsync image, and that is not configurable. Everything
+they read or write on the host therefore has to be owned by uid 1000 — which
+on a single-admin server is your own account, so there is nothing to create.
 
 ```bash
-sudo groupadd imapapp
-sudo useradd -r -g imapapp -s /bin/false -M imapapp
-sudo usermod -a -G imapapp "$USER"
+id -u        # expect 1000; if it is not, see app_uid in .env.bash.template
 ```
 
-Log out and back in for the group change to take effect.
+Do **not** create a service account for this with `useradd -r`. A system
+account gets a uid below 1000, and with the 0770 modes used below the
+container cannot even traverse the tree:
+
+```
+cert_file: open(/etc/dovecot/certs/tls.crt) failed: Permission denied
+```
 
 ## 2. Samba credentials
 
@@ -93,9 +99,14 @@ local-disk directories must exist before Dovecot starts.
 set -a; source .env.bash; set +a
 mkdir -p "${nas_mount_dir}" "${index_dir}" "${control_dir}" "${volatile_dir}" \
          "${cert_dir}" "${roundcube_db_dir}"
-sudo chown -R imapapp:imapapp "${local_mount_dir}"
+sudo chown -R "${app_uid}:${app_gid}" "${local_mount_dir}"
 sudo chmod -R 0770 "${local_mount_dir}"
 ```
+
+`app_uid`/`app_gid` are 1000:1000 for the reason given in step 1, and match
+`nas_mount_uid`/`nas_mount_gid` — the CIFS mount presents the archive as the
+same owner. Check it with `ls -lnd "${local_mount_dir}"`: the numeric owner
+must be 1000, not a lower system uid.
 
 ## 7. Install the systemd units
 

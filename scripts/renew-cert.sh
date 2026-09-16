@@ -58,8 +58,14 @@ docker run --rm \
 
 # Publish under stable names, so the Dovecot config never has to know about
 # lego's directory layout.
-install -m 0644 "${LEGO_DIR}/certificates/${MAIL_HOSTNAME}.crt" "${cert_dir}/tls.crt"
-install -m 0640 "${LEGO_DIR}/certificates/${MAIL_HOSTNAME}.key" "${cert_dir}/tls.key"
+#
+# This script runs as root, so the owner has to be set explicitly: Dovecot
+# reads these as vmail (uid 1000, see app_uid), and a root-owned 0640 key is
+# one it cannot open.
+install -o "${app_uid:-1000}" -g "${app_gid:-1000}" -m 0644 \
+  "${LEGO_DIR}/certificates/${MAIL_HOSTNAME}.crt" "${cert_dir}/tls.crt"
+install -o "${app_uid:-1000}" -g "${app_gid:-1000}" -m 0640 \
+  "${LEGO_DIR}/certificates/${MAIL_HOSTNAME}.key" "${cert_dir}/tls.key"
 
 AFTER_SUM="$(sha256sum "${cert_dir}/tls.crt" | cut -d' ' -f1)"
 
