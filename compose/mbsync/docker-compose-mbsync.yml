@@ -18,6 +18,16 @@ services:
       args:
         - ALPINE_VERSION=${ALPINE_VERSION:-3.21}
     image: imap-archive/mbsync:${ALPINE_VERSION:-3.21}
+    # Build locally, always, and never consult a registry.
+    #
+    # `imap-archive/mbsync` is an unqualified name, so Docker expands it to
+    # docker.io/imap-archive/mbsync - a namespace nobody owns. Without this,
+    # compose tries that pull first and only builds when it 404s. If someone
+    # registered the namespace and published a matching tag, the pull would
+    # succeed and compose would silently prefer their image over this
+    # Dockerfile - handing it the Gmail app password in /mbsyncrc and
+    # read-write access to the archive, on an unattended timer.
+    pull_policy: build
     # 1000:1000 = vmail, matching the CIFS mount and Dovecot.
     user: "1000:1000"
     volumes:
