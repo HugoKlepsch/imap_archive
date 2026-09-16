@@ -20,6 +20,9 @@
 #
 # This writes Maildir files directly onto the share. It does not go through
 # IMAP, so Dovecot's read-only ACL does not apply to it - that is by design.
+#
+# Afterwards it asks Dovecot, via doveadm, to subscribe and index the folder.
+# Both are no-ops if Dovecot is not running.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -192,12 +195,32 @@ AFTER="$(count_messages)"
 echo
 echo "Sync finished in ${ELAPSED}s. ${BEFORE} -> ${AFTER} messages (+$(( AFTER - BEFORE )))."
 
-# Dovecot indexes new files lazily, on the next client access. Nudging it here
-# means the first person to open the folder does not wait for a large scan,
-# and keeps the full-text index current for search.
-if [[ "${AFTER}" -ne "${BEFORE}" ]] && docker ps --format '{{.Names}}' | grep -qx imap_archive_dovecot; then
-  echo "Indexing new messages..."
+if [[ "${AFTER}" -gt 0 ]] && docker ps --format '{{.Names}}' | grep -qx imap_archive_dovecot; then
+  # Subscribe the archive folder.
+  #
+  # mbsync creates the folder by making a directory on the share; it never
+  # speaks IMAP and so never subscribes anything. Dovecot keeps subscriptions
+  # in its own file under mail_control_path, which therefore stays empty.
+  #
+  # Thunderbird hides that: it offers unsubscribed folders with a toggle. But
+  # Roundcube builds its folder list from LSUB, so an unsubscribed folder is
+  # simply absent - and config/roundcube/custom.inc.php disables
+  # settings.folders, so there is no UI to subscribe it either. The symptom is
+  # a web client that shows an empty INBOX and no sign that the archive exists.
+  #
+  # Idempotent, so it runs on every sync rather than only on the first: it also
+  # repairs the subscription if the control directory is ever lost or rebuilt.
   docker exec imap_archive_dovecot \
-    doveadm index -u "${ARCHIVE_USER}" "${ARCHIVE_FOLDER}" || \
-    echo "Warning: indexing failed; Dovecot will index on next access instead." >&2
+    doveadm mailbox subscribe -u "${ARCHIVE_USER}" "${ARCHIVE_FOLDER}" || \
+    echo "Warning: could not subscribe '${ARCHIVE_FOLDER}'; it may not appear in Roundcube." >&2
+
+  # Dovecot indexes new files lazily, on the next client access. Nudging it here
+  # means the first person to open the folder does not wait for a large scan,
+  # and keeps the full-text index current for search.
+  if [[ "${AFTER}" -ne "${BEFORE}" ]]; then
+    echo "Indexing new messages..."
+    docker exec imap_archive_dovecot \
+      doveadm index -u "${ARCHIVE_USER}" "${ARCHIVE_FOLDER}" || \
+      echo "Warning: indexing failed; Dovecot will index on next access instead." >&2
+  fi
 fi

@@ -265,6 +265,28 @@ sudo ./scripts/sync-gmail.sh
 Then confirm those messages appear in Thunderbird or Roundcube, with
 attachments intact, before committing to the full pull.
 
+The mail lands in `Archive`, not INBOX — INBOX is the Maildir root and stays
+empty forever. Roundcube opens INBOX on login, so the first sight of a working
+archive is legitimately an empty screen; click through to `Archive`.
+
+If `Archive` is not in Roundcube's folder list at all, it is not subscribed.
+mbsync creates the folder by writing a directory on the share and never speaks
+IMAP, so nothing subscribes it; Roundcube builds its folder list from `LSUB`
+and omits what is unsubscribed. `sync-gmail.sh` subscribes the folder after
+each sync, so this should not happen — but the first run of a version that
+predates that, or a rebuilt control directory, can leave it unsubscribed:
+
+```bash
+docker exec imap_archive_dovecot \
+  doveadm mailbox list -u "${ARCHIVE_USER}" -s        # subscribed folders
+docker exec imap_archive_dovecot \
+  doveadm mailbox subscribe -u "${ARCHIVE_USER}" "${ARCHIVE_FOLDER}"
+```
+
+Log out of Roundcube and back in afterwards; it caches the folder list for the
+session. Thunderbird masks the same condition, since it offers unsubscribed
+folders with a toggle — so "it works in Thunderbird" does not rule this out.
+
 > **There is no dry-run option, deliberately.** mbsync's `--dry-run` reports
 > "would pull N messages" while actually writing them to the archive and *not*
 > recording them in `.mbsyncstate` — the next real sync then pulls them again.

@@ -79,6 +79,29 @@ deliberately, so a name mismatch is a hard failure rather than a warning.
 docker exec imap_archive_roundcube getent hosts mail.hugo-klepsch.tech
 ```
 
+**No messages, or no `Archive` folder in the list.** Roundcube opens INBOX,
+which is the Maildir root and is always empty — the mail is in `Archive`. If
+`Archive` is missing from the folder list entirely, it is not subscribed:
+Roundcube builds that list from `LSUB`, and `config/roundcube/custom.inc.php`
+disables `settings.folders`, so there is no UI to subscribe it.
+
+```bash
+set -a; source .env.bash; set +a
+docker exec imap_archive_dovecot \
+  doveadm mailbox list -u "${ARCHIVE_USER}"           # all folders
+docker exec imap_archive_dovecot \
+  doveadm mailbox list -u "${ARCHIVE_USER}" -s        # subscribed only
+docker exec imap_archive_dovecot \
+  doveadm mailbox subscribe -u "${ARCHIVE_USER}" "${ARCHIVE_FOLDER}"
+```
+
+`sync-gmail.sh` does this after every sync, so it should stay fixed. It comes
+back if the control directory is rebuilt — subscriptions live under
+`mail_control_path`, not on the share, and are not reconstructible from the
+Maildir the way indexes are. Log out of Roundcube and back in afterwards; the
+folder list is cached per session. Thunderbird hides the whole problem by
+offering unsubscribed folders with a toggle.
+
 **Logged out constantly** usually means `ROUNDCUBE_DES_KEY` changed, which
 invalidates every existing session. That is harmless — log in again.
 
