@@ -45,7 +45,7 @@ docker run --rm \
   -e "LINODE_TTL=${LINODE_TTL:-30}" \
   -e "LINODE_PROPAGATION_TIMEOUT=${LINODE_PROPAGATION_TIMEOUT:-180}" \
   -e "LINODE_POLLING_INTERVAL=${LINODE_POLLING_INTERVAL:-15}" \
-  "goacme/lego:${LEGO_VERSION:?set LEGO_VERSION in .env.bash}" \
+  "goacme/lego:v${LEGO_VERSION:?set LEGO_VERSION in .env.bash}" \
     run \
     --path /data \
     --accept-tos \
