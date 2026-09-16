@@ -211,6 +211,34 @@ larger value costs nothing on a run that succeeds quickly. Do not "fix" it by
 lowering `LINODE_TTL` below 300 — lego refuses to start below that, and a TTL
 of 0 means "zone default", which resolvers cache for hours.
 
+### accountDoesNotExist
+
+```
+registration: resolve account by key: ... 400 ::
+urn:ietf:params:acme:error:accountDoesNotExist ::
+No account exists with the provided key
+```
+
+This means a previous run wrote the ACME account key and then died before it
+registered the account — a misconfiguration that fails during client setup
+does exactly that. lego then finds a key with no registration beside it,
+decides the account needs recovery, and asks the CA to look it up with
+`onlyReturnExisting`. The CA has never seen the key, so every subsequent run
+fails the same way; it never falls back to registering.
+
+The account key is worth nothing on its own, so delete the orphaned directory
+and let the next run register a fresh one. Note the server name in the path —
+staging and production accounts are stored separately:
+
+```bash
+set -a; source .env.bash; set +a
+ls "${local_mount_dir}/lego/accounts"
+sudo rm -rf "${local_mount_dir}/lego/accounts/acme-staging-v02.api.letsencrypt.org"
+sudo ./scripts/renew-cert.sh
+```
+
+Issued certificates live in `lego/certificates` and are untouched by this.
+
 ## Rebuilding indexes
 
 Indexes and control files are on local disk and are rebuildable from the
